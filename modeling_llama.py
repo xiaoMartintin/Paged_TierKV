@@ -49,6 +49,15 @@ from .configuration_llama import LlamaConfig
 logger = logging.get_logger(__name__)
 
 
+def _get_tierkv_runtime():
+    try:
+        from tierkv_policy import get_global_tierkv_runtime
+
+        return get_global_tierkv_runtime()
+    except Exception:
+        return None
+
+
 @use_kernel_forward_from_hub("RMSNorm")
 class LlamaRMSNorm(nn.Module):
     def __init__(self, hidden_size, eps: float = 1e-6) -> None:
@@ -221,6 +230,37 @@ def eager_attention_forward(
     return attn_output, attn_weights
 
 
+def compute_attention_score_proxy(
+    module: nn.Module,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    attention_mask: torch.Tensor | None,
+    scaling: float,
+    query_chunk_size: int = 64,
+) -> torch.Tensor:
+    key_states = repeat_kv(key, module.num_key_value_groups)
+    token_score_sum = torch.zeros(key_states.shape[-2], device=query.device, dtype=torch.float32)
+    score_count = 0
+
+    for query_start in range(0, query.shape[-2], query_chunk_size):
+        query_end = min(query_start + query_chunk_size, query.shape[-2])
+        query_chunk = query[:, :, query_start:query_end, :]
+        attn_logits = torch.matmul(query_chunk, key_states.transpose(2, 3)) * scaling
+
+        if attention_mask is not None:
+            mask_chunk = attention_mask
+            if attention_mask.ndim >= 3:
+                mask_chunk = attention_mask.narrow(attention_mask.ndim - 2, query_start, query_end - query_start)
+            attn_logits = attn_logits + mask_chunk
+
+        attn_weights = nn.functional.softmax(attn_logits, dim=-1, dtype=torch.float32)
+        token_score_sum += attn_weights.sum(dim=(0, 1, 2))
+        score_count += attn_weights.shape[0] * attn_weights.shape[1] * attn_weights.shape[2]
+
+    mean_token_scores = token_score_sum / max(score_count, 1)
+    return mean_token_scores.to(query.dtype).view(1, 1, 1, -1)
+
+
 @use_kernelized_func(apply_rotary_pos_emb)
 class LlamaAttention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
@@ -266,8 +306,38 @@ class LlamaAttention(nn.Module):
         cos, sin = position_embeddings
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
 
-        if past_key_values is not None:
-            key_states, value_states = past_key_values.update(key_states, value_states, self.layer_idx)
+        tierkv_runtime = _get_tierkv_runtime()
+        using_tierkv = tierkv_runtime is not None and getattr(past_key_values, "is_tierkv_cache", False)
+
+        if not using_tierkv:
+            if past_key_values is not None:
+                key_states, value_states = past_key_values.update(key_states, value_states, self.layer_idx)
+
+            attention_interface: Callable = ALL_ATTENTION_FUNCTIONS.get_interface(
+                self.config._attn_implementation, eager_attention_forward
+            )
+
+            attn_output, attn_weights = attention_interface(
+                self,
+                query_states,
+                key_states,
+                value_states,
+                attention_mask,
+                dropout=0.0 if not self.training else self.attention_dropout,
+                scaling=self.scaling,
+                **kwargs,
+            )
+
+            attn_output = attn_output.reshape(*input_shape, -1).contiguous()
+            attn_output = self.o_proj(attn_output)
+            return attn_output, attn_weights
+
+        seq_id = self.layer_idx
+        allocated_new_block = tierkv_runtime.append_to_layer(seq_id, key_states, value_states)
+        full_key_states, full_value_states, _, _ = tierkv_runtime.reconstruct_layer(seq_id)
+
+        if full_key_states is None or full_value_states is None:
+            raise RuntimeError(f"TieredKV failed to reconstruct KV tensors for layer {self.layer_idx}.")
 
         attention_interface: Callable = ALL_ATTENTION_FUNCTIONS.get_interface(
             self.config._attn_implementation, eager_attention_forward
@@ -276,16 +346,27 @@ class LlamaAttention(nn.Module):
         attn_output, attn_weights = attention_interface(
             self,
             query_states,
-            key_states,
-            value_states,
+            full_key_states,
+            full_value_states,
             attention_mask,
-            dropout=0.0 if not self.training else self.attention_dropout,
             scaling=self.scaling,
-            **kwargs,
+            dropout=0.0 if not self.training else self.attention_dropout,
         )
-
         attn_output = attn_output.reshape(*input_shape, -1).contiguous()
         attn_output = self.o_proj(attn_output)
+
+        if allocated_new_block and seq_id in tierkv_runtime.tiered_layer_indices:
+            score_proxy = compute_attention_score_proxy(
+                self,
+                query_states,
+                full_key_states,
+                attention_mask,
+                scaling=self.scaling,
+            )
+            block_scores = tierkv_runtime.policy_engine.compute_block_scores(score_proxy)
+            tierkv_runtime.policy_engine.enforce_budget(seq_id, block_scores, tierkv_runtime.hot_budget)
+            tierkv_runtime.sync_storage_states(seq_id)
+
         return attn_output, attn_weights
 
 
@@ -389,7 +470,14 @@ class LlamaModel(LlamaPreTrainedModel):
             inputs_embeds: torch.Tensor = self.embed_tokens(input_ids)
 
         if use_cache and past_key_values is None:
-            past_key_values = DynamicCache(config=self.config)
+            tierkv_runtime = _get_tierkv_runtime()
+            if tierkv_runtime is not None:
+                past_key_values = tierkv_runtime.cache
+            else:
+                past_key_values = DynamicCache(config=self.config)
+
+        if use_cache and getattr(past_key_values, "is_tierkv_cache", False):
+            past_key_values.begin_forward(inputs_embeds.shape[1])
 
         if position_ids is None:
             past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
@@ -419,6 +507,8 @@ class LlamaModel(LlamaPreTrainedModel):
             )
 
         hidden_states = self.norm(hidden_states)
+        if use_cache and getattr(past_key_values, "is_tierkv_cache", False):
+            past_key_values.finish_forward()
         return BaseModelOutputWithPast(
             last_hidden_state=hidden_states,
             past_key_values=past_key_values,

@@ -1,8 +1,11 @@
 import modal
 
 MODEL_ID = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+LOCAL_PROJECT_ROOT = "/root/paged_tierkv"
 LOCAL_MODELING_LLAMA_PATH = "/root/paged_tierkv/modeling_llama.py"
 LOCAL_MODELING_LLAMA_MODULE = "transformers.models.llama.modeling_llama"
+LOCAL_TIERKV_POLICY_PATH = "/root/paged_tierkv/tierkv_policy.py"
+LOCAL_TIERKV_POLICY_MODULE = "tierkv_policy"
 TIERKV_CPP = None
 
 tierkv_image = (
@@ -51,6 +54,32 @@ def load_local_llama_classes():
     return LlamaForCausalLM, LlamaConfig
 
 
+def load_tierkv_policy_symbols():
+    import importlib.util
+    import sys
+
+    existing_module = sys.modules.get(LOCAL_TIERKV_POLICY_MODULE)
+    if existing_module is not None and getattr(existing_module, "__file__", None) == LOCAL_TIERKV_POLICY_PATH:
+        module = existing_module
+    else:
+        spec = importlib.util.spec_from_file_location(
+            LOCAL_TIERKV_POLICY_MODULE,
+            LOCAL_TIERKV_POLICY_PATH,
+        )
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Unable to load tierkv_policy from {LOCAL_TIERKV_POLICY_PATH}")
+
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[LOCAL_TIERKV_POLICY_MODULE] = module
+        spec.loader.exec_module(module)
+
+    return (
+        module.TierKVPolicyEngine,
+        module.dequantize_int8_to_fp16,
+        module.quantize_fp16_to_int8,
+    )
+
+
 def test_block_manager():
     global TIERKV_CPP
 
@@ -93,6 +122,63 @@ def test_block_manager():
     assert manager.get_states(seq_id) == []
 
     print("BlockManager integration test passed.")
+
+
+def test_policy_and_quantization():
+    import torch
+
+    global TIERKV_CPP
+
+    if TIERKV_CPP is None:
+        raise RuntimeError("C++ extension must be loaded before running policy tests.")
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA is not available inside the Modal container.")
+
+    (
+        TierKVPolicyEngine,
+        dequantize_int8_to_fp16,
+        quantize_fp16_to_int8,
+    ) = load_tierkv_policy_symbols()
+
+    seq_id = 21
+    manager = TIERKV_CPP.BlockManager(total_blocks=16)
+    engine = TierKVPolicyEngine(block_size=16, block_manager=manager)
+
+    for _ in range(4):
+        manager.allocate_block(seq_id)
+
+    kv_tensor = torch.randn((1, 32, 16, 128), device="cuda", dtype=torch.float16)
+    quantized_tensor, scale, zero_point = quantize_fp16_to_int8(kv_tensor)
+    dequantized_tensor = dequantize_int8_to_fp16(quantized_tensor, scale, zero_point)
+
+    assert quantized_tensor.shape == kv_tensor.shape
+    assert dequantized_tensor.shape == kv_tensor.shape
+    assert quantized_tensor.dtype == torch.uint8
+    assert scale.dtype == torch.float16
+    assert zero_point.dtype == torch.float16
+
+    mse = torch.mean((dequantized_tensor.float() - kv_tensor.float()) ** 2).item()
+    print(f"Quantization MSE: {mse:.8f}")
+
+    block_pattern = torch.cat(
+        [
+            torch.full((16,), 0.4, device="cuda", dtype=torch.float16),
+            torch.full((16,), 0.9, device="cuda", dtype=torch.float16),
+            torch.full((16,), 0.1, device="cuda", dtype=torch.float16),
+            torch.full((16,), 0.2, device="cuda", dtype=torch.float16),
+        ]
+    )
+    attn_weights = block_pattern.view(1, 1, 1, 64).repeat(1, 32, 1, 1)
+
+    block_scores = engine.compute_block_scores(attn_weights)
+    engine.enforce_budget(seq_id, block_scores, hot_budget=3)
+
+    states = manager.get_states(seq_id)
+    print(f"Block Scores: {block_scores.tolist()}")
+    print(f"Block States: {states}")
+    assert states == [0, 0, 1, 0], f"Unexpected policy states: {states}"
+
+    print("Policy and quantization integration test passed.")
 
 
 def run_baseline_generation_benchmark():
@@ -195,7 +281,7 @@ def test_cpp_and_baseline():
     TIERKV_CPP = tierkv_cpp
 
     test_block_manager()
-    run_baseline_generation_benchmark()
+    test_policy_and_quantization()
 
 
 @app.local_entrypoint()

@@ -364,7 +364,12 @@ class LlamaAttention(nn.Module):
                 scaling=self.scaling,
             )
             block_scores = tierkv_runtime.policy_engine.compute_block_scores(score_proxy)
-            tierkv_runtime.policy_engine.enforce_budget(seq_id, block_scores, tierkv_runtime.hot_budget)
+            tierkv_runtime.policy_engine.enforce_budget(
+                seq_id,
+                block_scores,
+                tierkv_runtime.hot_budget,
+                demoted_state=tierkv_runtime.demoted_state,
+            )
             tierkv_runtime.sync_storage_states(seq_id)
 
         return attn_output, attn_weights

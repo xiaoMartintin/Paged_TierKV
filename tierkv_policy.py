@@ -45,10 +45,12 @@ class PhysicalKVPool:
     def __init__(self):
         self.hot_storage = {}
         self.warm_storage = {}
+        self.cold_storage = {}
 
     def store_hot_block(self, physical_idx, k_tensor, v_tensor) -> None:
         self.hot_storage[physical_idx] = (k_tensor.contiguous(), v_tensor.contiguous())
         self.warm_storage.pop(physical_idx, None)
+        self.cold_storage.pop(physical_idx, None)
 
     def demote_to_warm(self, physical_idx) -> None:
         if physical_idx in self.warm_storage:
@@ -68,9 +70,47 @@ class PhysicalKVPool:
             v_zero_point,
         )
 
+    def demote_to_cold(self, physical_idx) -> None:
+        if physical_idx in self.cold_storage:
+            return
+
+        if physical_idx in self.hot_storage:
+            k_tensor, v_tensor = self.hot_storage.pop(physical_idx)
+            metadata = (
+                tuple(k_tensor.shape),
+                k_tensor.device,
+                k_tensor.dtype,
+                tuple(v_tensor.shape),
+                v_tensor.device,
+                v_tensor.dtype,
+            )
+        elif physical_idx in self.warm_storage:
+            (
+                k_quantized,
+                _k_scale,
+                _k_zero_point,
+                v_quantized,
+                _v_scale,
+                _v_zero_point,
+            ) = self.warm_storage.pop(physical_idx)
+            metadata = (
+                tuple(k_quantized.shape),
+                k_quantized.device,
+                torch.float16,
+                tuple(v_quantized.shape),
+                v_quantized.device,
+                torch.float16,
+            )
+        else:
+            raise KeyError(f"Physical block {physical_idx} is not present in HOT or WARM storage.")
+
+        self.cold_storage[physical_idx] = metadata
+
     def promote_to_hot(self, physical_idx) -> None:
         if physical_idx in self.hot_storage:
             return
+        if physical_idx in self.cold_storage:
+            raise KeyError(f"Physical block {physical_idx} is not eligible for HOT promotion from COLD storage.")
         if physical_idx not in self.warm_storage:
             raise KeyError(f"Physical block {physical_idx} is not present in WARM storage.")
 
@@ -90,11 +130,15 @@ class PhysicalKVPool:
         if state == HOT_STATE:
             if physical_idx not in self.hot_storage and physical_idx in self.warm_storage:
                 self.promote_to_hot(physical_idx)
+            if physical_idx in self.cold_storage:
+                raise KeyError(f"Physical block {physical_idx} is marked HOT but only exists in COLD storage.")
             return self.hot_storage[physical_idx]
 
         if state == WARM_STATE:
             if physical_idx in self.hot_storage:
                 return self.hot_storage[physical_idx]
+            if physical_idx in self.cold_storage:
+                raise KeyError(f"Physical block {physical_idx} is marked WARM but only exists in COLD storage.")
 
             (
                 k_quantized,
@@ -108,11 +152,28 @@ class PhysicalKVPool:
             v_tensor = dequantize_int8_to_fp16(v_quantized, v_scale, v_zero_point)
             return k_tensor.contiguous(), v_tensor.contiguous()
 
+        if state == COLD_STATE:
+            if physical_idx not in self.cold_storage:
+                raise KeyError(f"Physical block {physical_idx} is not present in COLD storage.")
+
+            (
+                k_shape,
+                k_device,
+                k_dtype,
+                v_shape,
+                v_device,
+                v_dtype,
+            ) = self.cold_storage[physical_idx]
+            key_block = torch.zeros(k_shape, device=k_device, dtype=k_dtype).contiguous()
+            value_block = torch.zeros(v_shape, device=v_device, dtype=v_dtype).contiguous()
+            return key_block, value_block
+
         raise ValueError(f"Unsupported block state: {state}")
 
     def clear(self) -> None:
         self.hot_storage.clear()
         self.warm_storage.clear()
+        self.cold_storage.clear()
 
 
 class TierKVPolicyEngine:
@@ -134,13 +195,21 @@ class TierKVPolicyEngine:
 
         return torch.stack([chunk.mean() for chunk in block_chunks])
 
-    def enforce_budget(self, seq_id: int, block_scores: torch.Tensor, hot_budget: int):
+    def enforce_budget(
+        self,
+        seq_id: int,
+        block_scores: torch.Tensor,
+        hot_budget: int,
+        demoted_state: int = WARM_STATE,
+    ):
         physical_indices = self.block_manager.get_physical_indices(seq_id)
         current_states = self.block_manager.get_states(seq_id)
         num_blocks = len(physical_indices)
 
         if num_blocks == 0:
             return
+        if demoted_state not in (WARM_STATE, COLD_STATE):
+            raise ValueError("demoted_state must be WARM_STATE or COLD_STATE.")
         if block_scores.ndim != 1:
             raise ValueError("block_scores must be a 1D tensor.")
         if len(block_scores) != num_blocks:
@@ -163,7 +232,9 @@ class TierKVPolicyEngine:
         selected_hot = set(sorted_candidates[:extra_hot_slots])
 
         for block_idx in range(num_blocks):
-            desired_state = HOT_STATE if block_idx in reserved_hot or block_idx in selected_hot else WARM_STATE
+            desired_state = HOT_STATE if block_idx in reserved_hot or block_idx in selected_hot else demoted_state
+            if current_states[block_idx] == COLD_STATE and desired_state != COLD_STATE:
+                desired_state = COLD_STATE
             if current_states[block_idx] != desired_state:
                 self.block_manager.update_block_state(seq_id, block_idx, desired_state)
 
@@ -225,6 +296,8 @@ class TieredKVRuntime:
         self.num_layers = num_layers
         self.block_size = block_size
         self.hot_budget = hot_budget
+        self.demoted_state = WARM_STATE
+        self.cold_block_policy = "zero"
         self.tiered_layer_indices = set(range(num_layers))
         self.kv_pool = PhysicalKVPool()
         self.policy_engine = TierKVPolicyEngine(block_size=block_size, block_manager=block_manager)
@@ -302,6 +375,9 @@ class TieredKVRuntime:
         for physical_idx, state in zip(physical_indices, states):
             if state == HOT_STATE and physical_idx in self.kv_pool.warm_storage:
                 self.kv_pool.promote_to_hot(physical_idx)
+            elif state == COLD_STATE:
+                if physical_idx in self.kv_pool.hot_storage or physical_idx in self.kv_pool.warm_storage:
+                    self.kv_pool.demote_to_cold(physical_idx)
             elif state == WARM_STATE and physical_idx in self.kv_pool.hot_storage:
                 self.kv_pool.demote_to_warm(physical_idx)
 

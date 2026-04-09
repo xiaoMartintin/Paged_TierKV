@@ -2,8 +2,11 @@ import modal
 
 MODEL_ID = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 MIN_PROMPT_TOKENS = 512
-MAX_NEW_TOKENS = 100
+MAX_NEW_TOKENS = 50
 TIERKV_HOT_BUDGET = 8
+NEEDLE_NUM_SAMPLES = 2
+NEEDLE_CONTEXT_TOKENS = 1024
+NEEDLE_MAX_NEW_TOKENS = 16
 BENCHMARK_PARAGRAPH = (
     "Transformer inference over long contexts is dominated by key value cache growth, memory bandwidth limits, "
     "and the cost of repeatedly loading old activations during autoregressive decoding. In a production serving "
@@ -23,6 +26,8 @@ LOCAL_MODELING_LLAMA_PATH = "/root/paged_tierkv/modeling_llama.py"
 LOCAL_MODELING_LLAMA_MODULE = "transformers.models.llama.modeling_llama"
 LOCAL_TIERKV_POLICY_PATH = "/root/paged_tierkv/tierkv_policy.py"
 LOCAL_TIERKV_POLICY_MODULE = "tierkv_policy"
+LOCAL_TIERKV_EVAL_PATH = "/root/paged_tierkv/tierkv_eval.py"
+LOCAL_TIERKV_EVAL_MODULE = "tierkv_eval"
 TIERKV_CPP = None
 
 tierkv_image = (
@@ -32,7 +37,6 @@ tierkv_image = (
         "numpy<2",
         "torch==2.4.1",
         "git+https://github.com/huggingface/transformers.git@main",
-        "datasets==3.2.0",
         "accelerate==1.2.1",
         "ninja",
         "pybind11>=2.12"
@@ -101,6 +105,27 @@ def load_tierkv_policy_symbols():
     )
 
 
+def load_tierkv_eval_module():
+    import importlib.util
+    import sys
+
+    existing_module = sys.modules.get(LOCAL_TIERKV_EVAL_MODULE)
+    if existing_module is not None and getattr(existing_module, "__file__", None) == LOCAL_TIERKV_EVAL_PATH:
+        return existing_module
+
+    spec = importlib.util.spec_from_file_location(
+        LOCAL_TIERKV_EVAL_MODULE,
+        LOCAL_TIERKV_EVAL_PATH,
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load tierkv_eval from {LOCAL_TIERKV_EVAL_PATH}")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[LOCAL_TIERKV_EVAL_MODULE] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def build_long_benchmark_prompt(tokenizer, min_prompt_tokens=MIN_PROMPT_TOKENS):
     prompt_sections = []
     prompt_token_length = 0
@@ -119,21 +144,27 @@ def build_long_benchmark_prompt(tokenizer, min_prompt_tokens=MIN_PROMPT_TOKENS):
 def summarize_tieredkv_states(block_manager, num_layers):
     layer_summaries = {}
     warm_layer_count = 0
+    cold_layer_count = 0
     total_warm_blocks = 0
+    total_cold_blocks = 0
 
     for layer_idx in range(num_layers):
         states = block_manager.get_states(layer_idx)
         hot_count = sum(state == 0 for state in states)
         warm_count = sum(state == 1 for state in states)
+        cold_count = sum(state == 2 for state in states)
         layer_summaries[layer_idx] = {
             "total_blocks": len(states),
             "hot": hot_count,
             "warm": warm_count,
+            "cold": cold_count,
         }
         warm_layer_count += int(warm_count > 0)
+        cold_layer_count += int(cold_count > 0)
         total_warm_blocks += warm_count
+        total_cold_blocks += cold_count
 
-    return layer_summaries, warm_layer_count, total_warm_blocks
+    return layer_summaries, warm_layer_count, total_warm_blocks, cold_layer_count, total_cold_blocks
 
 
 def test_block_manager():
@@ -190,6 +221,7 @@ def test_policy_and_quantization():
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is not available inside the Modal container.")
 
+    policy_module = load_tierkv_policy_module()
     (
         TierKVPolicyEngine,
         dequantize_int8_to_fp16,
@@ -236,8 +268,6 @@ def test_policy_and_quantization():
 
     scalar_mse = torch.mean((scalar_dequantized.float() - kv_tensor.float()) ** 2).item()
     channel_wise_mse = torch.mean((dequantized_tensor.float() - kv_tensor.float()) ** 2).item()
-    print(f"Scalar Quantization MSE: {scalar_mse:.8f}")
-    print(f"Channel-wise Quantization MSE: {channel_wise_mse:.8f}")
     assert channel_wise_mse < scalar_mse, "Expected channel-wise quantization MSE to improve over scalar quantization."
 
     block_pattern = torch.cat(
@@ -254,10 +284,22 @@ def test_policy_and_quantization():
     engine.enforce_budget(seq_id, block_scores, hot_budget=3)
 
     states = manager.get_states(seq_id)
-    print(f"Block Scores: {block_scores.tolist()}")
-    print(f"Block States: {states}")
     assert states == [0, 0, 1, 0], f"Unexpected policy states: {states}"
 
+    cold_pool = policy_module.PhysicalKVPool()
+    cold_physical_idx = 55
+    cold_key = kv_tensor[:, :4, :8, :16].contiguous()
+    cold_value = kv_tensor[:, 4:8, :8, :16].contiguous()
+    cold_pool.store_hot_block(cold_physical_idx, cold_key, cold_value)
+    cold_pool.demote_to_cold(cold_physical_idx)
+    reconstructed_key, reconstructed_value = cold_pool.get_dequantized_block(
+        cold_physical_idx,
+        policy_module.COLD_STATE,
+    )
+    assert reconstructed_key.shape == cold_key.shape
+    assert reconstructed_value.shape == cold_value.shape
+    assert torch.count_nonzero(reconstructed_key) == 0
+    assert torch.count_nonzero(reconstructed_value) == 0
     print("Policy and quantization integration test passed.")
 
 
@@ -277,8 +319,6 @@ def run_generation_benchmark(model, tokenizer, label, max_new_tokens=MAX_NEW_TOK
     attention_mask = inputs["attention_mask"].to("cuda")
     if input_ids.shape[1] < MIN_PROMPT_TOKENS:
         raise RuntimeError(f"{label} prompt token length regressed below {MIN_PROMPT_TOKENS}.")
-
-    print(f"{label} Prompt Token Length: {input_ids.shape[1]}")
 
     torch.cuda.reset_peak_memory_stats()
     torch.cuda.synchronize()
@@ -326,11 +366,10 @@ def run_generation_benchmark(model, tokenizer, label, max_new_tokens=MAX_NEW_TOK
     return peak_mem, tokens_per_sec, generated_text, prompt_token_length
 
 
-def run_official_baseline_benchmark():
+def load_official_baseline_assets():
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    print("Loading official Hugging Face baseline model...")
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_ID,
         torch_dtype=torch.float16,
@@ -338,44 +377,15 @@ def run_official_baseline_benchmark():
     )
     model.eval()
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-
-    peak_mem, tokens_per_sec, generated_text, prompt_token_length = run_generation_benchmark(
-        model,
-        tokenizer,
-        label="Baseline",
-    )
-
-    print("=== Baseline Results ===")
-    print(f"Baseline Prompt Token Length: {prompt_token_length}")
-    print(f"Baseline Peak Memory (MB): {peak_mem:.2f}")
-    print(f"Baseline Tokens/sec: {tokens_per_sec:.2f}")
-    print("Baseline Generated Text:")
-    print(generated_text)
-    return peak_mem, tokens_per_sec, generated_text, prompt_token_length
+    return model, tokenizer
 
 
-def run_tieredkv_generation_benchmark():
+def load_local_tieredkv_assets():
     import torch
     from transformers import AutoTokenizer
 
-    global TIERKV_CPP
-
-    if TIERKV_CPP is None:
-        raise RuntimeError("C++ extension must be loaded before running TieredKV benchmark.")
-
-    policy_module = load_tierkv_policy_module()
-    policy_module.reset_global_tierkv()
-
     LlamaForCausalLM, LlamaConfig = load_local_llama_classes()
-
-    print("Loading local TieredKV model with hijacked attention...")
     config = LlamaConfig.from_pretrained(MODEL_ID)
-    tiered_cache = policy_module.initialize_global_tierkv(
-        block_manager=TIERKV_CPP.BlockManager(),
-        num_layers=config.num_hidden_layers,
-        block_size=16,
-        hot_budget=TIERKV_HOT_BUDGET,
-    )
 
     model = LlamaForCausalLM.from_pretrained(
         MODEL_ID,
@@ -385,43 +395,159 @@ def run_tieredkv_generation_benchmark():
     )
     model.eval()
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+    return model, tokenizer, config
 
-    peak_mem, tokens_per_sec, generated_text, prompt_token_length = run_generation_benchmark(
+
+def initialize_tierkv_runtime_for_row(policy_module, num_layers, hot_budget, demoted_state):
+    global TIERKV_CPP
+
+    if TIERKV_CPP is None:
+        raise RuntimeError("C++ extension must be loaded before running TieredKV evaluation rows.")
+
+    policy_module.reset_global_tierkv()
+    tiered_cache = policy_module.initialize_global_tierkv(
+        block_manager=TIERKV_CPP.BlockManager(),
+        num_layers=num_layers,
+        block_size=16,
+        hot_budget=hot_budget,
+    )
+    runtime = tiered_cache.runtime
+    runtime.demoted_state = demoted_state
+    runtime.cold_block_policy = "zero"
+    runtime.tiered_layer_indices = set(range(num_layers))
+    return tiered_cache, runtime
+
+
+def run_baseline_row(model, tokenizer, eval_module):
+    peak_mem, tokens_per_sec, _, _ = run_generation_benchmark(
         model,
         tokenizer,
-        label="TieredKV",
+        label="Baseline",
+    )
+    needle = eval_module.evaluate_long_context(
+        model,
+        tokenizer,
+        num_samples=NEEDLE_NUM_SAMPLES,
+        context_tokens=NEEDLE_CONTEXT_TOKENS,
+        max_new_tokens=NEEDLE_MAX_NEW_TOKENS,
+    )
+
+    return {
+        "configuration": "Baseline",
+        "peak_memory_mb": peak_mem,
+        "needle": needle,
+        "tokens_per_sec": tokens_per_sec,
+    }
+
+
+def run_tieredkv_row(model, tokenizer, config, eval_module, policy_module, label, hot_budget, demoted_state):
+    tiered_cache, runtime = initialize_tierkv_runtime_for_row(
+        policy_module,
+        config.num_hidden_layers,
+        hot_budget=hot_budget,
+        demoted_state=demoted_state,
+    )
+    peak_mem, tokens_per_sec, _, _ = run_generation_benchmark(
+        model,
+        tokenizer,
+        label=label,
         initial_past_key_values=tiered_cache,
     )
 
-    runtime = tiered_cache.runtime
-    layer_summaries, warm_layer_count, total_warm_blocks = summarize_tieredkv_states(
+    _, _, total_warm_blocks, _, total_cold_blocks = summarize_tieredkv_states(
         runtime.block_manager,
         runtime.num_layers,
     )
-    sample_layers = sorted({0, runtime.num_layers // 2, runtime.num_layers - 1})
 
-    print("=== TieredKV Results ===")
-    print(f"TieredKV Prompt Token Length: {prompt_token_length}")
-    print(f"TieredKV Peak Memory (MB): {peak_mem:.2f}")
-    print(f"TieredKV Generation Throughput (Tokens/sec): {tokens_per_sec:.2f}")
-    print("TieredKV Generated Text:")
-    print(generated_text)
-    print("=== TieredKV Demotion Summary ===")
-    print(f"Total Layers: {runtime.num_layers}")
-    print(f"Layers With Warm Blocks: {warm_layer_count}")
-    print(f"Total Warm Blocks: {total_warm_blocks}")
-    for layer_idx in sample_layers:
-        summary = layer_summaries[layer_idx]
-        print(
-            f"Layer {layer_idx}: total_blocks={summary['total_blocks']}, "
-            f"HOT={summary['hot']}, WARM={summary['warm']}"
-        )
+    if demoted_state == policy_module.WARM_STATE and total_warm_blocks == 0:
+        raise RuntimeError(f"{label} did not produce any WARM blocks.")
+    if demoted_state == policy_module.COLD_STATE and total_cold_blocks == 0:
+        raise RuntimeError(f"{label} did not produce any COLD blocks.")
 
-    if warm_layer_count != runtime.num_layers:
-        raise RuntimeError("Expected every decoder layer to contain at least one WARM block after long-context prefill.")
+    _, _ = initialize_tierkv_runtime_for_row(
+        policy_module,
+        config.num_hidden_layers,
+        hot_budget=hot_budget,
+        demoted_state=demoted_state,
+    )
+    needle = eval_module.evaluate_long_context(
+        model,
+        tokenizer,
+        num_samples=NEEDLE_NUM_SAMPLES,
+        context_tokens=NEEDLE_CONTEXT_TOKENS,
+        max_new_tokens=NEEDLE_MAX_NEW_TOKENS,
+    )
 
     policy_module.reset_global_tierkv()
-    return peak_mem, tokens_per_sec, generated_text, prompt_token_length, warm_layer_count
+    return {
+        "configuration": label,
+        "peak_memory_mb": peak_mem,
+        "needle": needle,
+        "tokens_per_sec": tokens_per_sec,
+    }
+
+
+def ablation_runner():
+    import torch
+
+    policy_module = load_tierkv_policy_module()
+    eval_module = load_tierkv_eval_module()
+    results = []
+
+    policy_module.reset_global_tierkv()
+    baseline_model, baseline_tokenizer = load_official_baseline_assets()
+    results.append(run_baseline_row(baseline_model, baseline_tokenizer, eval_module))
+    del baseline_model
+    del baseline_tokenizer
+    torch.cuda.empty_cache()
+
+    tiered_model, tiered_tokenizer, tiered_config = load_local_tieredkv_assets()
+    row_specs = [
+        {
+            "configuration": "Pure Quantization",
+            "hot_budget": 0,
+            "demoted_state": policy_module.WARM_STATE,
+        },
+        {
+            "configuration": "Pure Sparsification",
+            "hot_budget": 0,
+            "demoted_state": policy_module.COLD_STATE,
+        },
+        {
+            "configuration": "Paged-TierKV (budget=4)",
+            "hot_budget": 4,
+            "demoted_state": policy_module.WARM_STATE,
+        },
+        {
+            "configuration": "Paged-TierKV (budget=8)",
+            "hot_budget": 8,
+            "demoted_state": policy_module.WARM_STATE,
+        },
+    ]
+
+    for row_spec in row_specs:
+        results.append(
+            run_tieredkv_row(
+                tiered_model,
+                tiered_tokenizer,
+                tiered_config,
+                eval_module,
+                policy_module,
+                label=row_spec["configuration"],
+                hot_budget=row_spec["hot_budget"],
+                demoted_state=row_spec["demoted_state"],
+            )
+        )
+        torch.cuda.empty_cache()
+
+    del tiered_model
+    del tiered_tokenizer
+    policy_module.reset_global_tierkv()
+    torch.cuda.empty_cache()
+
+    markdown_table = eval_module.format_markdown_table(results)
+    print(markdown_table)
+    return results
 
 
 @app.function(
@@ -432,12 +558,11 @@ def run_tieredkv_generation_benchmark():
 def test_cpp_and_baseline():
     from torch.utils.cpp_extension import load
 
-    print("Compiling C++ extension on cloud GPU...")
     tierkv_cpp = load(
         name="tierkv_cpp",
         sources=["/root/paged_tierkv/csrc/block_manager.cpp"],
         extra_cflags=["-O3", "-std=c++17"],
-        verbose=True
+        verbose=False
     )
 
     global TIERKV_CPP
@@ -445,12 +570,7 @@ def test_cpp_and_baseline():
 
     test_block_manager()
     test_policy_and_quantization()
-    baseline_peak, baseline_tps, _, _ = run_official_baseline_benchmark()
-    tiered_peak, tiered_tps, _, _, warm_layer_count = run_tieredkv_generation_benchmark()
-    print("=== Phase 4.5 Comparison ===")
-    print(f"Peak Memory Savings (MB): {baseline_peak - tiered_peak:.2f}")
-    print(f"Throughput Delta (Tokens/sec): {tiered_tps - baseline_tps:.2f}")
-    print(f"Warm Layers Verified: {warm_layer_count}")
+    ablation_runner()
 
 
 @app.local_entrypoint()

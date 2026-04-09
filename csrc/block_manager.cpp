@@ -1,5 +1,4 @@
 #include <torch/extension.h>
-#include <iostream>
 #include <pybind11/stl.h>
 #include <stdexcept>
 #include <unordered_map>
@@ -32,9 +31,6 @@ public:
         for (int idx = total_blocks_ - 1; idx >= 0; --idx) {
             free_list_.push_back(idx);
         }
-
-        std::cout << "[Cloud C++] Block Manager Initialized on Modal GPU with "
-                  << total_blocks_ << " physical blocks." << std::endl;
     }
 
     int allocate_block(int seq_id) {
@@ -49,30 +45,20 @@ public:
         int logical_id = static_cast<int>(sequence_blocks.size());
         sequence_blocks.push_back(Block{logical_id, physical_idx, seq_id, BlockState::HOT});
 
-        std::cout << "[Cloud C++] allocate_block: seq_id=" << seq_id
-                  << ", logical_id=" << logical_id
-                  << ", physical_idx=" << physical_idx
-                  << ", state=HOT" << std::endl;
-
         return physical_idx;
     }
 
     void free_sequence(int seq_id) {
         auto table_it = block_table_.find(seq_id);
         if (table_it == block_table_.end()) {
-            std::cout << "[Cloud C++] free_sequence: seq_id=" << seq_id
-                      << " not found, nothing to free." << std::endl;
             return;
         }
 
         for (const auto& block : table_it->second) {
             free_list_.push_back(block.physical_idx);
-            std::cout << "[Cloud C++] free_sequence: returned physical_idx="
-                      << block.physical_idx << " for seq_id=" << seq_id << std::endl;
         }
 
         block_table_.erase(table_it);
-        std::cout << "[Cloud C++] free_sequence: cleared seq_id=" << seq_id << std::endl;
     }
 
     void update_block_state(int seq_id, int logical_id, int new_state_int) {
@@ -88,10 +74,6 @@ public:
 
         BlockState new_state = parse_state(new_state_int);
         blocks[logical_id].state = new_state;
-
-        std::cout << "[Cloud C++] update_block_state: seq_id=" << seq_id
-                  << ", logical_id=" << logical_id
-                  << ", new_state=" << new_state_int << std::endl;
     }
 
     std::vector<int> get_physical_indices(int seq_id) const {

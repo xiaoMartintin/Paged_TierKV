@@ -40,4 +40,4 @@ We will use standard language modeling datasets (e.g., WikiText) for perplexity 
   Metrics include:
   - Peak Memory Usage (MB)
   - Throughput (tokens/s)
-  - Perplexity / Accuracy
+  - Accuracy

@@ -58,6 +58,23 @@ def _get_tierkv_runtime():
         return None
 
 
+def _get_tierkv_decode_attention():
+    try:
+        from tierkv_triton import tierkv_decode_attention
+
+        return tierkv_decode_attention
+    except Exception as exc:
+        raise RuntimeError("Unable to import tierkv_triton. Use TIERKV_ATTENTION_BACKEND=eager to fall back.") from exc
+
+
+def _is_tierkv_triton_mask_safe(attention_mask: torch.Tensor | None) -> bool:
+    if attention_mask is None:
+        return True
+    # MVP TierKV decode is batch-1/no-padding. Avoid torch.all(...).item()
+    # here because that creates a CPU-GPU sync on every decode step.
+    return attention_mask.ndim == 2
+
+
 @use_kernel_forward_from_hub("RMSNorm")
 class LlamaRMSNorm(nn.Module):
     def __init__(self, hidden_size, eps: float = 1e-6) -> None:
@@ -261,6 +278,30 @@ def compute_attention_score_proxy(
     return mean_token_scores.to(query.dtype).view(1, 1, 1, -1)
 
 
+def compute_prefill_block_scores(
+    policy_engine,
+    attn_weights: torch.Tensor | None,
+    seq_len: int,
+    block_size: int,
+    device: torch.device,
+) -> torch.Tensor:
+    if attn_weights is not None:
+        return policy_engine.compute_block_scores(attn_weights)
+
+    num_blocks = (int(seq_len) + int(block_size) - 1) // int(block_size)
+    if num_blocks <= 0:
+        return torch.empty(0, device=device, dtype=torch.float32)
+
+    # SDPA/Flash prefill does not return attention probabilities. Use a compact
+    # sink+recency proxy instead of materializing a second full attention matrix.
+    scores = torch.arange(num_blocks, device=device, dtype=torch.float32)
+    if num_blocks > 1:
+        scores = scores / float(num_blocks - 1)
+    scores[0] = 1.0
+    scores[-1] = 1.0
+    return scores
+
+
 @use_kernelized_func(apply_rotary_pos_emb)
 class LlamaAttention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
@@ -333,45 +374,132 @@ class LlamaAttention(nn.Module):
             return attn_output, attn_weights
 
         seq_id = self.layer_idx
+        query_len = query_states.shape[-2]
+        decode_total_start = tierkv_runtime.profile_start() if query_len == 1 else None
+
+        if query_len > 1:
+            profile_start = tierkv_runtime.profile_start()
+            attention_interface: Callable = ALL_ATTENTION_FUNCTIONS.get_interface(
+                self.config._attn_implementation, eager_attention_forward
+            )
+            attn_output, attn_weights = attention_interface(
+                self,
+                query_states,
+                key_states,
+                value_states,
+                attention_mask,
+                scaling=self.scaling,
+                dropout=0.0 if not self.training else self.attention_dropout,
+            )
+            tierkv_runtime.profile_end("prefill_attention_ms", profile_start)
+            profile_start = tierkv_runtime.profile_start()
+            tierkv_runtime.append_to_layer(seq_id, key_states, value_states)
+            tierkv_runtime.profile_end("prefill_kv_append_ms", profile_start)
+
+            if seq_id in tierkv_runtime.tiered_layer_indices and tierkv_runtime.policy_mode != "hot_only":
+                profile_start = tierkv_runtime.profile_start()
+                block_scores = compute_prefill_block_scores(
+                    tierkv_runtime.policy_engine,
+                    attn_weights,
+                    key_states.shape[-2],
+                    tierkv_runtime.block_size,
+                    query_states.device,
+                )
+                tierkv_runtime.enforce_policy(seq_id, block_scores)
+                tierkv_runtime.sync_storage_states(seq_id)
+                tierkv_runtime.profile_end("prefill_policy_ms", profile_start)
+
+            attn_output = attn_output.reshape(*input_shape, -1).contiguous()
+            attn_output = self.o_proj(attn_output)
+            return attn_output, attn_weights
+
+        profile_start = tierkv_runtime.profile_start()
         allocated_new_block = tierkv_runtime.append_to_layer(seq_id, key_states, value_states)
-        full_key_states, full_value_states, _, _ = tierkv_runtime.reconstruct_layer(seq_id)
-
-        if full_key_states is None or full_value_states is None:
-            raise RuntimeError(f"TieredKV failed to reconstruct KV tensors for layer {self.layer_idx}.")
-
-        attention_interface: Callable = ALL_ATTENTION_FUNCTIONS.get_interface(
-            self.config._attn_implementation, eager_attention_forward
+        tierkv_runtime.profile_end("decode_kv_append_ms", profile_start)
+        output_attentions = bool(kwargs.get("output_attentions", False))
+        triton_mask_safe = bool(kwargs.get("tierkv_triton_mask_safe", False))
+        run_policy = tierkv_runtime.should_run_decode_policy(seq_id, allocated_new_block)
+        collect_scores = tierkv_runtime.should_collect_decode_scores(seq_id, run_policy)
+        use_triton = (
+            tierkv_runtime.attention_backend == "triton"
+            and not output_attentions
+            and triton_mask_safe
+            and query_states.is_cuda
         )
 
-        attn_output, attn_weights = attention_interface(
-            self,
-            query_states,
-            full_key_states,
-            full_value_states,
-            attention_mask,
-            scaling=self.scaling,
-            dropout=0.0 if not self.training else self.attention_dropout,
-        )
-        attn_output = attn_output.reshape(*input_shape, -1).contiguous()
-        attn_output = self.o_proj(attn_output)
+        if use_triton:
+            block_table, block_states, block_lengths, num_blocks = tierkv_runtime.get_layer_table(seq_id)
+            tierkv_decode_attention = _get_tierkv_decode_attention()
+            profile_start = tierkv_runtime.profile_start()
+            attn_output, score_sums = tierkv_decode_attention(
+                query_states,
+                block_table,
+                block_states,
+                block_lengths,
+                tierkv_runtime.kv_pool.hot_k_pool,
+                tierkv_runtime.kv_pool.hot_v_pool,
+                tierkv_runtime.kv_pool.warm_k_pool,
+                tierkv_runtime.kv_pool.warm_v_pool,
+                tierkv_runtime.kv_pool.k_scale,
+                tierkv_runtime.kv_pool.k_zero,
+                tierkv_runtime.kv_pool.v_scale,
+                tierkv_runtime.kv_pool.v_zero,
+                num_blocks=num_blocks,
+                num_key_value_groups=self.num_key_value_groups,
+                scaling=self.scaling,
+                return_scores=collect_scores,
+            )
+            tierkv_runtime.profile_end("triton_decode_ms", profile_start)
+            attn_weights = None
 
-        if allocated_new_block and seq_id in tierkv_runtime.tiered_layer_indices:
-            score_proxy = compute_attention_score_proxy(
+            if collect_scores and score_sums is not None:
+                profile_start = tierkv_runtime.profile_start()
+                block_scores = tierkv_runtime.block_scores_from_probability_sums(seq_id, score_sums)
+                tierkv_runtime.profile_end("decode_score_accum_ms", profile_start)
+                if run_policy:
+                    profile_start = tierkv_runtime.profile_start()
+                    tierkv_runtime.enforce_policy(seq_id, block_scores)
+                    tierkv_runtime.sync_storage_states(seq_id)
+                    tierkv_runtime.profile_end("decode_policy_ms", profile_start)
+        else:
+            profile_start = tierkv_runtime.profile_start()
+            full_key_states, full_value_states, _, _ = tierkv_runtime.reconstruct_layer(
+                seq_id,
+                allow_decode_reconstruct=True,
+            )
+            tierkv_runtime.profile_end("decode_reconstruct_ms", profile_start)
+            if full_key_states is None or full_value_states is None:
+                raise RuntimeError(f"TieredKV failed to reconstruct KV tensors for layer {self.layer_idx}.")
+
+            attention_interface: Callable = ALL_ATTENTION_FUNCTIONS.get_interface(
+                self.config._attn_implementation, eager_attention_forward
+            )
+            attn_output, attn_weights = attention_interface(
                 self,
                 query_states,
                 full_key_states,
+                full_value_states,
                 attention_mask,
                 scaling=self.scaling,
+                dropout=0.0 if not self.training else self.attention_dropout,
             )
-            block_scores = tierkv_runtime.policy_engine.compute_block_scores(score_proxy)
-            tierkv_runtime.policy_engine.enforce_budget(
-                seq_id,
-                block_scores,
-                tierkv_runtime.hot_budget,
-                demoted_state=tierkv_runtime.demoted_state,
-            )
-            tierkv_runtime.sync_storage_states(seq_id)
+            if run_policy:
+                profile_start = tierkv_runtime.profile_start()
+                score_proxy = compute_attention_score_proxy(
+                    self,
+                    query_states,
+                    full_key_states,
+                    attention_mask,
+                    scaling=self.scaling,
+                )
+                block_scores = tierkv_runtime.policy_engine.compute_block_scores(score_proxy)
+                tierkv_runtime.enforce_policy(seq_id, block_scores)
+                tierkv_runtime.sync_storage_states(seq_id)
+                tierkv_runtime.profile_end("decode_policy_ms", profile_start)
 
+        attn_output = attn_output.reshape(*input_shape, -1).contiguous()
+        attn_output = self.o_proj(attn_output)
+        tierkv_runtime.profile_end("decode_total_ms", decode_total_start)
         return attn_output, attn_weights
 
 
@@ -483,6 +611,9 @@ class LlamaModel(LlamaPreTrainedModel):
 
         if use_cache and getattr(past_key_values, "is_tierkv_cache", False):
             past_key_values.begin_forward(inputs_embeds.shape[1])
+            tierkv_triton_mask_safe = _is_tierkv_triton_mask_safe(attention_mask)
+        else:
+            tierkv_triton_mask_safe = False
 
         if position_ids is None:
             past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
@@ -508,6 +639,7 @@ class LlamaModel(LlamaPreTrainedModel):
                 position_ids=position_ids,
                 past_key_values=past_key_values,
                 use_cache=use_cache,
+                tierkv_triton_mask_safe=tierkv_triton_mask_safe,
                 **kwargs,
             )
 

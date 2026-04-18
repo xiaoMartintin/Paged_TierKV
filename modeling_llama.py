@@ -347,7 +347,11 @@ class LlamaAttention(nn.Module):
         cos, sin = position_embeddings
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
 
-        tierkv_runtime = _get_tierkv_runtime()
+        tierkv_runtime = (
+            getattr(past_key_values, "runtime", None)
+            if getattr(past_key_values, "is_tierkv_cache", False)
+            else _get_tierkv_runtime()
+        )
         using_tierkv = tierkv_runtime is not None and getattr(past_key_values, "is_tierkv_cache", False)
 
         if not using_tierkv:
@@ -392,10 +396,6 @@ class LlamaAttention(nn.Module):
                 dropout=0.0 if not self.training else self.attention_dropout,
             )
             tierkv_runtime.profile_end("prefill_attention_ms", profile_start)
-            profile_start = tierkv_runtime.profile_start()
-            tierkv_runtime.append_to_layer(seq_id, key_states, value_states)
-            tierkv_runtime.profile_end("prefill_kv_append_ms", profile_start)
-
             if seq_id in tierkv_runtime.tiered_layer_indices and tierkv_runtime.policy_mode != "hot_only":
                 profile_start = tierkv_runtime.profile_start()
                 block_scores = compute_prefill_block_scores(
@@ -405,9 +405,12 @@ class LlamaAttention(nn.Module):
                     tierkv_runtime.block_size,
                     query_states.device,
                 )
-                tierkv_runtime.enforce_policy(seq_id, block_scores)
-                tierkv_runtime.sync_storage_states(seq_id)
+                tierkv_runtime.append_prefill_with_policy(seq_id, key_states, value_states, block_scores)
                 tierkv_runtime.profile_end("prefill_policy_ms", profile_start)
+            else:
+                profile_start = tierkv_runtime.profile_start()
+                tierkv_runtime.append_to_layer(seq_id, key_states, value_states)
+                tierkv_runtime.profile_end("prefill_kv_append_ms", profile_start)
 
             attn_output = attn_output.reshape(*input_shape, -1).contiguous()
             attn_output = self.o_proj(attn_output)

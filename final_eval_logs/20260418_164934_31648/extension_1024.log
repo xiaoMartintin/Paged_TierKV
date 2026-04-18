@@ -1,0 +1,188 @@
+### Command: env TIERKV_EXTENSION_MODEL_ID=lmsys/vicuna-7b-v1.5 TIERKV_EXTENSION_CONTEXT_TOKENS=1024 TIERKV_EXTENSION_COUNTS=1\,2\,4\,6\,8\,12 TIERKV_EXTENSION_DECODE_STEPS=16 modal run main.py --extension-scaling
+
+✓ Initialized. View run at https://modal.com/apps/lixuank/main/ap-cHOo36gSm2IThpnT3OrYno
+✓ Created objects.
+├── 🔨 Created mount /Users/kanglixuan/Library/Mobile Documents/com~apple~CloudDocs/15-642 ML 
+│   Sys/paged-tierkv/main.py
+├── 🔨 Created mount /Users/kanglixuan/Library/Mobile Documents/com~apple~CloudDocs/15-642 ML 
+│   Sys/paged-tierkv
+├── 🔨 Created function test_cpp_and_baseline.
+├── 🔨 Created function run_no_score_anomaly_benchmark.
+├── 🔨 Created function run_preservation_tests.
+└── 🔨 Created function run_final_benchmark.
+BlockManager integration test passed.
+Policy and quantization integration test passed.
+Tensor-pool lazy growth test passed.
+Tensor-pool and Triton decode tests passed.
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Context truncation and decode metadata guard tests passed.
+Policy scheduling and tier-mode tests passed.
+Memory telemetry and multi-runtime tests passed.
+Compact pool slot transition tests passed.
+=== 7B Extension Model Config ===
+| Field | Value |
+| --- | --- |
+| model_id | lmsys/vicuna-7b-v1.5 |
+| model_type | llama |
+| hidden_size | 4096 |
+| num_hidden_layers | 32 |
+| num_attention_heads | 32 |
+| num_key_value_heads | 32 |
+| max_position_embeddings | 4096 |
+| attention_layout | MHA |
+
+=== Main Result Reminder ===
+TinyLlama remains the primary project result. This 7B run is an extension experiment.
+
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+
+[1AFetching 2 files:   0%|          | 0/2 [00:00<?, ?it/s]
+[1AFetching 2 files:  50%|█████     | 1/2 [01:05<01:05, 65.48s/it]
+[1AFetching 2 files: 100%|██████████| 2/2 [01:05<00:00, 32.74s/it]
+
+[1ALoading weights:   0%|          | 0/291 [00:00<?, ?it/s]
+[1ALoading weights:   5%|▍         | 14/291 [00:00<00:02, 138.28it/s]
+[1ALoading weights:  11%|█         | 32/291 [00:00<00:01, 158.89it/s]
+[1ALoading weights:  17%|█▋        | 50/291 [00:00<00:01, 166.18it/s]
+[1ALoading weights:  23%|██▎       | 68/291 [00:00<00:01, 168.51it/s]
+[1ALoading weights:  30%|██▉       | 86/291 [00:00<00:01, 170.32it/s]
+[1ALoading weights:  36%|███▌      | 104/291 [00:00<00:01, 170.89it/s]
+[1ALoading weights:  42%|████▏     | 122/291 [00:00<00:00, 171.48it/s]
+[1ALoading weights:  48%|████▊     | 140/291 [00:00<00:00, 171.67it/s]
+[1ALoading weights:  54%|█████▍    | 158/291 [00:00<00:00, 171.88it/s]
+[1ALoading weights:  60%|██████    | 176/291 [00:01<00:00, 172.43it/s]
+[1ALoading weights:  67%|██████▋   | 194/291 [00:01<00:00, 172.61it/s]
+[1ALoading weights:  73%|███████▎  | 212/291 [00:01<00:00, 172.09it/s]
+[1ALoading weights:  79%|███████▉  | 230/291 [00:01<00:00, 172.16it/s]
+[1ALoading weights:  85%|████████▌ | 248/291 [00:01<00:00, 173.32it/s]
+[1ALoading weights:  91%|█████████▏| 266/291 [00:01<00:00, 173.71it/s]
+[1ALoading weights:  98%|█████████▊| 284/291 [00:01<00:00, 173.75it/s]
+[1ALoading weights: 100%|██████████| 291/291 [00:01<00:00, 172.20it/s]
+[transformers] The following generation flags are not valid and may be ignored: ['temperature', 'top_p']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
+
+[1AFetching 2 files:   0%|          | 0/2 [00:00<?, ?it/s]Fetching 2 files: 100%|██████████| 2/2 [00:00<00:00, 32017.59it/s]
+
+[1ALoading weights:   0%|          | 0/291 [00:00<?, ?it/s]
+[1ALoading weights:   3%|▎         | 9/291 [00:00<00:03, 89.64it/s]
+[1ALoading weights:   9%|▉         | 27/291 [00:00<00:01, 140.04it/s]
+[1ALoading weights:  15%|█▌        | 45/291 [00:00<00:01, 155.99it/s]
+[1ALoading weights:  22%|██▏       | 63/291 [00:00<00:01, 163.82it/s]
+[1ALoading weights:  28%|██▊       | 81/291 [00:00<00:01, 167.96it/s]
+[1ALoading weights:  34%|███▍      | 99/291 [00:00<00:01, 169.81it/s]
+[1ALoading weights:  40%|████      | 117/291 [00:00<00:01, 171.40it/s]
+[1ALoading weights:  46%|████▋     | 135/291 [00:00<00:00, 172.60it/s]
+[1ALoading weights:  53%|█████▎    | 153/291 [00:00<00:00, 173.30it/s]
+[1ALoading weights:  59%|█████▉    | 171/291 [00:01<00:00, 173.80it/s]
+[1ALoading weights:  65%|██████▍   | 189/291 [00:01<00:00, 173.77it/s]
+[1ALoading weights:  71%|███████   | 207/291 [00:01<00:00, 172.68it/s]
+[1ALoading weights:  77%|███████▋  | 225/291 [00:01<00:00, 173.02it/s]
+[1ALoading weights:  84%|████████▎ | 243/291 [00:01<00:00, 173.47it/s]
+[1ALoading weights:  90%|████████▉ | 261/291 [00:01<00:00, 173.66it/s]
+[1ALoading weights:  96%|█████████▌| 279/291 [00:01<00:00, 173.88it/s]Loading weights: 100%|██████████| 291/291 [00:01<00:00, 170.19it/s]
+=== 7B Extension Passkey Sanity ===
+| Method | Status | Contains Passkey | Peak MB | tok/s | Generated Snippet |
+| --- | --- | --- | ---: | ---: | --- |
+| Baseline | OK | True | 12895.28 | 23.04 | The passkey is 739241. nobodys perfectI'm sorry, |
+| Paged-TierKV | OK | True | 12924.89 | 9.97 | The passkey is 739241. nobodys perfectI'm sorry, |
+
+7B Extension scaling config: model=lmsys/vicuna-7b-v1.5, requests=[1, 2, 4, 6, 8, 12], context_tokens=1024, decode_steps=16, max_total_tokens=1136
+
+[1AFetching 2 files:   0%|          | 0/2 [00:00<?, ?it/s]Fetching 2 files: 100%|██████████| 2/2 [00:00<00:00, 36954.22it/s]
+
+[1ALoading weights:   0%|          | 0/291 [00:00<?, ?it/s]
+[1ALoading weights:   3%|▎         | 10/291 [00:00<00:03, 92.59it/s]
+[1ALoading weights:  10%|▉         | 29/291 [00:00<00:01, 145.34it/s]
+[1ALoading weights:  16%|█▌        | 47/291 [00:00<00:01, 158.93it/s]
+[1ALoading weights:  22%|██▏       | 65/291 [00:00<00:01, 165.16it/s]
+[1ALoading weights:  29%|██▊       | 83/291 [00:00<00:01, 168.26it/s]
+[1ALoading weights:  35%|███▍      | 101/291 [00:00<00:01, 169.76it/s]
+[1ALoading weights:  41%|████      | 119/291 [00:00<00:01, 171.16it/s]
+[1ALoading weights:  47%|████▋     | 137/291 [00:00<00:00, 171.82it/s]
+[1ALoading weights:  53%|█████▎    | 155/291 [00:00<00:00, 172.77it/s]
+[1ALoading weights:  59%|█████▉    | 173/291 [00:01<00:00, 173.29it/s]
+[1ALoading weights:  66%|██████▌   | 191/291 [00:01<00:00, 173.94it/s]
+[1ALoading weights:  72%|███████▏  | 209/291 [00:01<00:00, 173.34it/s]
+[1ALoading weights:  78%|███████▊  | 227/291 [00:01<00:00, 173.63it/s]
+[1ALoading weights:  84%|████████▍ | 245/291 [00:01<00:00, 173.48it/s]
+[1ALoading weights:  90%|█████████ | 263/291 [00:01<00:00, 174.42it/s]
+[1ALoading weights:  97%|█████████▋| 281/291 [00:01<00:00, 174.47it/s]
+[1ALoading weights: 100%|██████████| 291/291 [00:01<00:00, 170.22it/s]
+
+[1AFetching 2 files:   0%|          | 0/2 [00:00<?, ?it/s]
+[1AFetching 2 files: 100%|██████████| 2/2 [00:00<00:00, 41120.63it/s]
+
+[1ALoading weights:   0%|          | 0/291 [00:00<?, ?it/s]
+[1ALoading weights:   3%|▎         | 10/291 [00:00<00:02, 97.25it/s]
+[1ALoading weights:  10%|▉         | 28/291 [00:00<00:01, 142.63it/s]
+[1ALoading weights:  16%|█▌        | 46/291 [00:00<00:01, 156.71it/s]
+[1ALoading weights:  22%|██▏       | 64/291 [00:00<00:01, 163.52it/s]
+[1ALoading weights:  28%|██▊       | 81/291 [00:00<00:01, 165.80it/s]
+[1ALoading weights:  34%|███▍      | 99/291 [00:00<00:01, 168.25it/s]
+[1ALoading weights:  40%|████      | 117/291 [00:00<00:01, 170.21it/s]
+[1ALoading weights:  46%|████▋     | 135/291 [00:00<00:00, 171.10it/s]
+[1ALoading weights:  53%|█████▎    | 153/291 [00:00<00:00, 171.40it/s]
+[1ALoading weights:  59%|█████▉    | 171/291 [00:01<00:00, 172.06it/s]
+[1ALoading weights:  65%|██████▍   | 189/291 [00:01<00:00, 172.71it/s]
+[1ALoading weights:  71%|███████   | 207/291 [00:01<00:00, 172.20it/s]
+[1ALoading weights:  77%|███████▋  | 225/291 [00:01<00:00, 170.66it/s]
+[1ALoading weights:  84%|████████▍ | 244/291 [00:01<00:00, 175.07it/s]
+[1ALoading weights:  90%|█████████ | 262/291 [00:01<00:00, 175.18it/s]
+[1ALoading weights:  96%|█████████▌| 280/291 [00:01<00:00, 175.07it/s]Loading weights: 100%|██████████| 291/291 [00:01<00:00, 169.71it/s]
+=== 7B Extension Throughput Scaling ===
+| Requests | Baseline tok/s | TierKV tok/s | TierKV / Baseline |
+| ---: | ---: | ---: | ---: |
+| 1 | 26.79 | 11.82 | 0.44x |
+| 2 | 26.83 | 15.74 | 0.59x |
+| 4 | 26.60 | 18.80 | 0.71x |
+| 6 | 26.82 | 16.53 | 0.62x |
+| 8 | 26.81 | 20.17 | 0.75x |
+| 12 | 26.80 | 20.64 | 0.77x |
+
+=== 7B Extension Memory Scaling ===
+| Requests | Baseline Peak MB | TierKV Peak MB | TierKV Logical Resident KV MB | TierKV Physical KV MB | TierKV Dense Eq KV MB | TierKV Logical Compression | TierKV Physical Compression |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 13389.32 | 13219.67 | 303.50 | 318.46 | 520.50 | 1.71x | 1.63x |
+| 2 | 13917.83 | 13552.23 | 615.00 | 647.42 | 1049.00 | 1.71x | 1.62x |
+| 4 | 14975.70 | 14213.68 | 1238.00 | 1301.84 | 2106.00 | 1.70x | 1.62x |
+| 6 | 16049.19 | 14937.72 | 1861.50 | 1985.07 | 3179.00 | 1.71x | 1.60x |
+| 8 | 17138.82 | 15621.59 | 2501.00 | 2675.30 | 4268.00 | 1.71x | 1.60x |
+| 12 | 19285.36 | 16955.56 | 3748.00 | 4020.75 | 6414.00 | 1.71x | 1.60x |
+
+=== 7B Extension Status ===
+| Requests | Baseline status | TierKV status | Notes |
+| ---: | --- | --- | --- |
+| 1 | OK | OK | — |
+| 2 | OK | OK | — |
+| 4 | OK | OK | — |
+| 6 | OK | OK | — |
+| 8 | OK | OK | — |
+| 12 | OK | OK | — |
+
+=== 7B Extension Failure Boundary ===
+| Method | Max Successful Requests | Largest Successful Total Context Tokens | Peak MB At Max Success | Logical Resident MB | Physical KV MB | Dense-Equivalent KV MB | Failure Request Count | Failure Type |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Baseline | 12 | 12288 | 19285.36 | 0.00 | 0.00 | 0.00 | n/a | none |
+| Paged-TierKV | 12 | 12288 | 16955.56 | 3748.00 | 4020.75 | 6414.00 | n/a | none |
+
+### Scaling Analysis
+Common successful range: 1 to 12 requests.
+Throughput slope: Baseline 0.0006 tok/s/request (0.0%), TierKV 0.8011 tok/s/request (74.5%).
+Peak-memory slope: Baseline 536.00 MB/request (44.0%), TierKV 339.63 MB/request (28.3%).
+TierKV physical KV slope: 336.57 MB/request (1162.6%).
+Throughput scaling conclusion: TierKV degrades more slowly over the common range.
+Memory scaling conclusion: TierKV peak memory grows more slowly than baseline.
+Failure-boundary conclusion: Both methods reached the same maximum tested load.
+
+=== 7B Extension Crossover Analysis ===
+Model: lmsys/vicuna-7b-v1.5
+Context tokens: 1024
+Decode steps: 16
+No throughput crossover in the tested range; the TierKV throughput gap narrows (ratio 0.44x -> 0.77x).
+Memory gap trend: 169.65 MB -> 2329.80 MB (delta 2160.15 MB).
+Last physical compression: 1.60x.
+Boundary: Baseline max 12 requests, TierKV max 12 requests.
+
+=== Final Extension Conclusion Guidance ===
+Report this section separately from the TinyLlama result. Use the crossover analysis above to state whether TierKV exceeded baseline throughput, or whether the memory-pressure benefit did not translate into an absolute tok/s win.
+Stopping app - local entrypoint completed.
+✓ App completed. View run at https://modal.com/apps/lixuank/main/ap-cHOo36gSm2IThpnT3OrYno

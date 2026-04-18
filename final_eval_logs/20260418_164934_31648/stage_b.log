@@ -1,0 +1,76 @@
+### Command: env TIERKV_STAGED_COUNTS=192\,224\,256\,320 TIERKV_STAGED_CONTEXT_TOKENS=1900 TIERKV_STAGED_DECODE_STEPS=16 modal run main.py --staged-scaling
+
+✓ Initialized. View run at https://modal.com/apps/lixuank/main/ap-KDTvLOsVhfjaPgnH3Fy2y3
+✓ Created objects.
+├── 🔨 Created mount /Users/kanglixuan/Library/Mobile Documents/com~apple~CloudDocs/15-642 ML Sys/paged-tierkv/main.py
+├── 🔨 Created mount /Users/kanglixuan/Library/Mobile Documents/com~apple~CloudDocs/15-642 ML Sys/paged-tierkv
+├── 🔨 Created function test_cpp_and_baseline.
+├── 🔨 Created function run_no_score_anomaly_benchmark.
+├── 🔨 Created function run_preservation_tests.
+└── 🔨 Created function run_final_benchmark.
+BlockManager integration test passed.
+Policy and quantization integration test passed.
+Tensor-pool lazy growth test passed.
+Tensor-pool and Triton decode tests passed.
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Context truncation and decode metadata guard tests passed.
+Policy scheduling and tier-mode tests passed.
+Memory telemetry and multi-runtime tests passed.
+Compact pool slot transition tests passed.
+Staged scaling config: model=TinyLlama/TinyLlama-1.1B-Chat-v1.0, requests=[192, 224, 256, 320], context_tokens=1900, decode_steps=16, max_total_tokens=2048
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+
+[1ALoading weights:   0%|          | 0/201 [00:00<?, ?it/s]
+[1ALoading weights:   0%|          | 1/201 [00:00<00:21,  9.10it/s]
+[1ALoading weights:  33%|███▎      | 67/201 [00:00<00:00, 376.09it/s]
+[1ALoading weights:  56%|█████▌    | 112/201 [00:00<00:00, 404.02it/s]
+[1ALoading weights:  78%|███████▊  | 157/201 [00:00<00:00, 394.93it/s]
+[1ALoading weights: 100%|██████████| 201/201 [00:00<00:00, 397.50it/s]
+
+[1ALoading weights:   0%|          | 0/201 [00:00<?, ?it/s]
+[1ALoading weights:   0%|          | 1/201 [00:00<00:27,  7.16it/s]
+[1ALoading weights:  29%|██▉       | 59/201 [00:00<00:00, 292.41it/s]
+[1ALoading weights:  47%|████▋     | 94/201 [00:00<00:00, 316.24it/s]
+[1ALoading weights:  65%|██████▌   | 131/201 [00:00<00:00, 329.41it/s]
+[1ALoading weights:  87%|████████▋ | 175/201 [00:00<00:00, 354.20it/s]
+[1ALoading weights: 100%|██████████| 201/201 [00:00<00:00, 326.79it/s]
+=== Staged Throughput Scaling ===
+| Requests | Baseline tok/s | TierKV tok/s | TierKV / Baseline |
+| ---: | ---: | ---: | ---: |
+| 192 | 60.42 | 50.61 | 0.84x |
+| 224 | 60.43 | 50.05 | 0.83x |
+| 256 | 60.66 | 52.17 | 0.86x |
+| 320 | 59.89 | 40.92 | 0.68x |
+
+=== Staged Memory Scaling ===
+| Requests | Baseline Peak MB | TierKV Peak MB | TierKV Logical Resident KV MB | TierKV Physical KV MB | TierKV Dense Eq KV MB | TierKV Logical Compression | TierKV Physical Compression |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 192 | 10032.04 | 6928.96 | 4473.56 | 4752.00 | 7907.62 | 1.77x | 1.66x |
+| 224 | 11416.49 | 7792.48 | 5285.16 | 5628.00 | 9291.56 | 1.76x | 1.65x |
+| 256 | 12811.94 | 8633.45 | 6107.75 | 6476.00 | 10686.50 | 1.75x | 1.65x |
+| 320 | 15536.85 | 10267.70 | 7563.19 | 8081.00 | 13410.38 | 1.77x | 1.66x |
+
+=== Staged Status ===
+| Requests | Baseline status | TierKV status | Notes |
+| ---: | --- | --- | --- |
+| 192 | OK | OK | — |
+| 224 | OK | OK | — |
+| 256 | OK | OK | — |
+| 320 | OK | OK | — |
+
+=== Staged Failure Boundary ===
+| Method | Max Successful Requests | Largest Successful Total Context Tokens | Peak MB At Max Success | Logical Resident MB | Physical KV MB | Dense-Equivalent KV MB | Failure Request Count | Failure Type |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Baseline | 320 | 608000 | 15536.85 | 0.00 | 0.00 | 0.00 | n/a | none |
+| Paged-TierKV | 320 | 608000 | 10267.70 | 7563.19 | 8081.00 | 13410.38 | n/a | none |
+
+### Scaling Analysis
+Common successful range: 192 to 320 requests.
+Throughput slope: Baseline -0.0041 tok/s/request (-0.9%), TierKV -0.0757 tok/s/request (-19.2%).
+Peak-memory slope: Baseline 43.01 MB/request (54.9%), TierKV 26.08 MB/request (48.2%).
+TierKV physical KV slope: 26.01 MB/request (70.1%).
+Throughput scaling conclusion: TierKV does not yet degrade more slowly than baseline.
+Memory scaling conclusion: TierKV peak memory grows more slowly than baseline.
+Failure-boundary conclusion: Both methods reached the same maximum tested load.
+Stopping app - local entrypoint completed.
+✓ App completed. View run at https://modal.com/apps/lixuank/main/ap-KDTvLOsVhfjaPgnH3Fy2y3

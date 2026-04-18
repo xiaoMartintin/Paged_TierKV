@@ -1,0 +1,52 @@
+### Command: modal run main.py --tier-mode-ablation
+
+✓ Initialized. View run at https://modal.com/apps/lixuank/main/ap-VmDyJxlilheNzja2X81m5a
+✓ Created objects.
+├── 🔨 Created mount /Users/kanglixuan/Library/Mobile Documents/com~apple~CloudDocs/15-642 ML Sys/paged-tierkv/main.py
+├── 🔨 Created mount /Users/kanglixuan/Library/Mobile Documents/com~apple~CloudDocs/15-642 ML Sys/paged-tierkv
+├── 🔨 Created function test_cpp_and_baseline.
+├── 🔨 Created function run_no_score_anomaly_benchmark.
+├── 🔨 Created function run_preservation_tests.
+└── 🔨 Created function run_final_benchmark.
+BlockManager integration test passed.
+Policy and quantization integration test passed.
+Tensor-pool lazy growth test passed.
+Tensor-pool and Triton decode tests passed.
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Context truncation and decode metadata guard tests passed.
+Policy scheduling and tier-mode tests passed.
+Memory telemetry and multi-runtime tests passed.
+Compact pool slot transition tests passed.
+
+[1ALoading weights:   0%|          | 0/201 [00:00<?, ?it/s]
+[1ALoading weights:  15%|█▌        | 31/201 [00:00<00:00, 279.61it/s]
+[1ALoading weights:  42%|████▏     | 85/201 [00:00<00:00, 406.09it/s]
+[1ALoading weights:  69%|██████▉   | 139/201 [00:00<00:00, 448.01it/s]
+[1ALoading weights:  93%|█████████▎| 186/201 [00:00<00:00, 455.50it/s]Loading weights: 100%|██████████| 201/201 [00:00<00:00, 449.12it/s]
+
+[1AGenerating test split: 0 examples [00:00, ? examples/s]Generating test split: 224 examples [00:00, 1930.22 examples/s]
+
+[1ALoading weights:   0%|          | 0/201 [00:00<?, ?it/s]
+[1ALoading weights:  15%|█▌        | 31/201 [00:00<00:00, 293.72it/s]
+[1ALoading weights:  42%|████▏     | 85/201 [00:00<00:00, 408.05it/s]
+[1ALoading weights:  69%|██████▉   | 139/201 [00:00<00:00, 451.59it/s]
+[1ALoading weights:  96%|█████████▌| 193/201 [00:00<00:00, 470.09it/s]
+[1ALoading weights: 100%|██████████| 201/201 [00:00<00:00, 462.33it/s]
+| Mode | Peak Memory (MB) | Qasper F1 | Qasper tok/s |
+| --- | ---: | ---: | ---: |
+| HOT-only | 2239.72 | 11.16 | 23.53 |
+| HOT+WARM | 2222.87 | 10.67 | 12.77 |
+| HOT+WARM+COLD | 2208.14 | 1.47 | 19.80 |
+| Mode | Peak Mem (MB) | Qasper F1 | tok/s | HOT/WARM/COLD | Logical Resident (MB) | Dense Eq KV (MB) | Physical KV (MB) | Logical Compression | Physical Compression | Pool Util |
+| --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| HOT-only | 2239.72 | 11.16 | 23.53 | 2662/0/0 | 41.5 | 41.5 | 41.9 | 1.00x | 0.99x | 99.2% |
+| HOT+WARM | 2222.87 | 10.67 | 12.77 | 220/2442/0 | 23.6 | 41.5 | 24.8 | 1.76x | 1.68x | 95.5% |
+| HOT+WARM+COLD | 2208.14 | 1.47 | 19.80 | 220/704/1738 | 9.2 | 41.5 | 9.4 | 4.52x | 4.40x | 98.5% |
+| Context Tokens | HOT-only tok/s | HOT+WARM tok/s | HOT+WARM+COLD tok/s |
+| ---: | ---: | ---: | ---: |
+| 512 | 24.69 | 31.32 | 40.83 |
+| 1024 | 24.88 | 35.73 | 39.65 |
+| 1536 | 24.70 | 35.46 | 40.78 |
+| 1900 | 15.88 | 31.24 | 40.38 |
+Stopping app - local entrypoint completed.
+✓ App completed. View run at https://modal.com/apps/lixuank/main/ap-VmDyJxlilheNzja2X81m5a

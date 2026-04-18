@@ -78,14 +78,14 @@ if triton is not None:
         l_i = tl.full((), 0.0, dtype=tl.float32)
 
         for block_idx in range(0, num_blocks):
-            physical_idx = tl.load(block_table_ptr + block_idx)
+            slot_idx = tl.load(block_table_ptr + block_idx)
             state = tl.load(block_states_ptr + block_idx)
-            block_len = tl.load(block_lengths_ptr + physical_idx)
+            block_len = tl.load(block_lengths_ptr + block_idx)
             kv_offsets = (
-                ((physical_idx * kv_heads + kv_head) * block_size + token_offsets[:, None]) * head_dim
+                ((slot_idx * kv_heads + kv_head) * block_size + token_offsets[:, None]) * head_dim
                 + dim_offsets[None, :]
             )
-            meta_offsets = (physical_idx * kv_heads + kv_head) * block_size + token_offsets
+            meta_offsets = (slot_idx * kv_heads + kv_head) * block_size + token_offsets
 
             is_hot = state == 0
             is_warm = state == 1
@@ -120,14 +120,14 @@ if triton is not None:
 
         if return_scores:
             for block_idx in range(0, num_blocks):
-                physical_idx = tl.load(block_table_ptr + block_idx)
+                slot_idx = tl.load(block_table_ptr + block_idx)
                 state = tl.load(block_states_ptr + block_idx)
-                block_len = tl.load(block_lengths_ptr + physical_idx)
+                block_len = tl.load(block_lengths_ptr + block_idx)
                 kv_offsets = (
-                    ((physical_idx * kv_heads + kv_head) * block_size + token_offsets[:, None]) * head_dim
+                    ((slot_idx * kv_heads + kv_head) * block_size + token_offsets[:, None]) * head_dim
                     + dim_offsets[None, :]
                 )
-                meta_offsets = (physical_idx * kv_heads + kv_head) * block_size + token_offsets
+                meta_offsets = (slot_idx * kv_heads + kv_head) * block_size + token_offsets
 
                 is_hot = state == 0
                 is_warm = state == 1
@@ -185,15 +185,15 @@ if triton is not None:
         for rel_block_idx in range(0, chunk_blocks):
             block_idx = chunk_start + rel_block_idx
             active_block = block_idx < num_blocks
-            physical_idx = tl.load(block_table_ptr + block_idx, mask=active_block, other=0)
+            slot_idx = tl.load(block_table_ptr + block_idx, mask=active_block, other=0)
             state = tl.load(block_states_ptr + block_idx, mask=active_block, other=2)
-            block_len = tl.load(block_lengths_ptr + physical_idx, mask=active_block, other=0)
+            block_len = tl.load(block_lengths_ptr + block_idx, mask=active_block, other=0)
 
             kv_offsets = (
-                ((physical_idx * kv_heads + kv_head) * block_size + token_offsets[:, None]) * head_dim
+                ((slot_idx * kv_heads + kv_head) * block_size + token_offsets[:, None]) * head_dim
                 + dim_offsets[None, :]
             )
-            meta_offsets = (physical_idx * kv_heads + kv_head) * block_size + token_offsets
+            meta_offsets = (slot_idx * kv_heads + kv_head) * block_size + token_offsets
 
             is_hot = active_block & (state == 0)
             is_warm = active_block & (state == 1)
@@ -746,26 +746,27 @@ def _eager_reference_decode(
     all_valid = []  # list of [tokens] bool
 
     for block_idx in range(num_blocks):
-        phys = int(block_table[block_idx].item())
+        slot = int(block_table[block_idx].item())
         state = int(block_states[block_idx].item())
-        blen = int(block_lengths[phys].item())
+        blen = int(block_lengths[block_idx].item())
 
         # Reconstruct k/v for this block following kernel formula:
         #   k_vals = k_hot + (k_warm - k_zero) * k_scale
         # For HOT:  k_hot = real, k_warm = 0, k_scale = 1, k_zero = 0  → k_hot
         # For WARM: k_hot = 0,    k_warm = quantized                    → dequantized
         # For COLD: k_hot = 0,    k_warm = 0, k_scale = 1, k_zero = 0  → 0
-        k_hot_blk = hot_k_pool[phys].float()   # [kv_heads, block_size, head_dim]
-        v_hot_blk = hot_v_pool[phys].float()
+        safe_slot = max(slot, 0)
+        k_hot_blk = hot_k_pool[safe_slot].float()   # [kv_heads, block_size, head_dim]
+        v_hot_blk = hot_v_pool[safe_slot].float()
 
         if state == WARM_STATE:
-            k_warm_blk = warm_k_pool[phys].float()   # [kv_heads, block_size, head_dim]
-            v_warm_blk = warm_v_pool[phys].float()
+            k_warm_blk = warm_k_pool[safe_slot].float()   # [kv_heads, block_size, head_dim]
+            v_warm_blk = warm_v_pool[safe_slot].float()
             # k_scale/k_zero shape: [pool_blocks, kv_heads, block_size, 1]
-            ks = k_scale[phys].float()   # [kv_heads, block_size, 1]
-            kz = k_zero[phys].float()
-            vs = v_scale[phys].float()
-            vz = v_zero[phys].float()
+            ks = k_scale[safe_slot].float()   # [kv_heads, block_size, 1]
+            kz = k_zero[safe_slot].float()
+            vs = v_scale[safe_slot].float()
+            vz = v_zero[safe_slot].float()
             k_blk = (k_warm_blk - kz) * ks   # [kv_heads, block_size, head_dim]
             v_blk = (v_warm_blk - vz) * vs
         elif state == COLD_STATE:

@@ -1,0 +1,76 @@
+### Command: env TIERKV_STAGED_COUNTS=384\,448\,512 TIERKV_STAGED_CONTEXT_TOKENS=1900 TIERKV_STAGED_DECODE_STEPS=16 modal run main.py --staged-scaling
+
+✓ Initialized. View run at https://modal.com/apps/lixuank/main/ap-uinOsHlEUgxxByjUxONGnR
+✓ Created objects.
+├── 🔨 Created mount /Users/kanglixuan/Library/Mobile Documents/com~apple~CloudDocs/15-642 ML Sys/paged-tierkv/main.py
+├── 🔨 Created mount /Users/kanglixuan/Library/Mobile Documents/com~apple~CloudDocs/15-642 ML Sys/paged-tierkv
+├── 🔨 Created function test_cpp_and_baseline.
+├── 🔨 Created function run_no_score_anomaly_benchmark.
+├── 🔨 Created function run_preservation_tests.
+└── 🔨 Created function run_final_benchmark.
+BlockManager integration test passed.
+Policy and quantization integration test passed.
+Tensor-pool lazy growth test passed.
+Tensor-pool and Triton decode tests passed.
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Context truncation and decode metadata guard tests passed.
+Policy scheduling and tier-mode tests passed.
+Memory telemetry and multi-runtime tests passed.
+Compact pool slot transition tests passed.
+Staged scaling config: model=TinyLlama/TinyLlama-1.1B-Chat-v1.0, requests=[384, 448, 512], context_tokens=1900, decode_steps=16, max_total_tokens=2048
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+
+[1ALoading weights:   0%|          | 0/201 [00:00<?, ?it/s]
+[1ALoading weights:   0%|          | 1/201 [00:00<00:34,  5.81it/s]
+[1ALoading weights:  24%|██▍       | 49/201 [00:00<00:00, 209.05it/s]
+[1ALoading weights:  38%|███▊      | 77/201 [00:00<00:00, 235.95it/s]
+[1ALoading weights:  57%|█████▋    | 114/201 [00:00<00:00, 276.28it/s]
+[1ALoading weights:  74%|███████▍  | 149/201 [00:00<00:00, 299.69it/s]
+[1ALoading weights:  92%|█████████▏| 184/201 [00:00<00:00, 298.72it/s]Loading weights: 100%|██████████| 201/201 [00:00<00:00, 274.89it/s]
+
+[1ALoading weights:   0%|          | 0/201 [00:00<?, ?it/s]
+[1ALoading weights:   0%|          | 1/201 [00:00<00:24,  8.24it/s]
+[1ALoading weights:  15%|█▌        | 31/201 [00:00<00:01, 160.26it/s]
+[1ALoading weights:  33%|███▎      | 67/201 [00:00<00:00, 231.91it/s]
+[1ALoading weights:  47%|████▋     | 95/201 [00:00<00:00, 243.16it/s]
+[1ALoading weights:  60%|██████    | 121/201 [00:00<00:00, 247.63it/s]
+[1ALoading weights:  77%|███████▋  | 155/201 [00:00<00:00, 271.99it/s]
+[1ALoading weights:  91%|█████████ | 183/201 [00:00<00:00, 270.45it/s]
+[1ALoading weights: 100%|██████████| 201/201 [00:00<00:00, 244.39it/s]
+=== Staged Throughput Scaling ===
+| Requests | Baseline tok/s | TierKV tok/s | TierKV / Baseline |
+| ---: | ---: | ---: | ---: |
+| 384 | 44.02 | 38.78 | 0.88x |
+| 448 | 43.40 | 38.34 | 0.88x |
+| 512 | — | 38.24 | — |
+
+=== Staged Memory Scaling ===
+| Requests | Baseline Peak MB | TierKV Peak MB | TierKV Logical Resident KV MB | TierKV Physical KV MB | TierKV Dense Eq KV MB | TierKV Logical Compression | TierKV Physical Compression |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 384 | 17942.75 | 11750.07 | 8947.12 | 9504.00 | 15815.25 | 1.77x | 1.66x |
+| 448 | 20711.66 | 13471.93 | 10570.31 | 11256.00 | 18583.12 | 1.76x | 1.65x |
+| 512 | — | 15159.07 | 12215.50 | 12952.00 | 21373.00 | 1.75x | 1.65x |
+
+=== Staged Status ===
+| Requests | Baseline status | TierKV status | Notes |
+| ---: | --- | --- | --- |
+| 384 | OK | OK | — |
+| 448 | OK | OK | — |
+| 512 | OOM | OK | Baseline: CUDA out of memory. Tried to allocate 22.00 MiB. GPU 0 has a total capacity of 22.06 GiB of which 23.44 MiB is free. Process 1 has 22.03 GiB memory in use. Of the allocated memory 20.51 GiB is allocated by PyTorch, and 1.22 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables) |
+
+=== Staged Failure Boundary ===
+| Method | Max Successful Requests | Largest Successful Total Context Tokens | Peak MB At Max Success | Logical Resident MB | Physical KV MB | Dense-Equivalent KV MB | Failure Request Count | Failure Type |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Baseline | 448 | 851200 | 20711.66 | 0.00 | 0.00 | 0.00 | 512 | OOM |
+| Paged-TierKV | 512 | 972800 | 15159.07 | 12215.50 | 12952.00 | 21373.00 | n/a | none |
+
+### Scaling Analysis
+Common successful range: 384 to 448 requests.
+Throughput slope: Baseline -0.0098 tok/s/request (-1.4%), TierKV -0.0069 tok/s/request (-1.1%).
+Peak-memory slope: Baseline 43.26 MB/request (15.4%), TierKV 26.90 MB/request (14.7%).
+TierKV physical KV slope: 27.38 MB/request (18.4%).
+Throughput scaling conclusion: TierKV degrades more slowly over the common range.
+Memory scaling conclusion: TierKV peak memory grows more slowly than baseline.
+Failure-boundary conclusion: TierKV reaches a higher supported load.
+Stopping app - local entrypoint completed.
+✓ App completed. View run at https://modal.com/apps/lixuank/main/ap-uinOsHlEUgxxByjUxONGnR

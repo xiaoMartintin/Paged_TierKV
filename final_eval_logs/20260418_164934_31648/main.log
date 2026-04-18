@@ -1,0 +1,77 @@
+### Command: modal run main.py
+
+✓ Initialized. View run at https://modal.com/apps/lixuank/main/ap-3FvbUOVUFeX3dp1YfUpvGW
+✓ Created objects.
+├── 🔨 Created mount /Users/kanglixuan/Library/Mobile Documents/com~apple~CloudDocs/15-642 ML Sys/paged-tierkv/main.py
+├── 🔨 Created mount /Users/kanglixuan/Library/Mobile Documents/com~apple~CloudDocs/15-642 ML Sys/paged-tierkv
+├── 🔨 Created function test_cpp_and_baseline.
+├── 🔨 Created function run_no_score_anomaly_benchmark.
+├── 🔨 Created function run_preservation_tests.
+└── 🔨 Created function run_final_benchmark.
+BlockManager integration test passed.
+Policy and quantization integration test passed.
+Tensor-pool lazy growth test passed.
+Tensor-pool and Triton decode tests passed.
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Context truncation and decode metadata guard tests passed.
+Policy scheduling and tier-mode tests passed.
+Memory telemetry and multi-runtime tests passed.
+Compact pool slot transition tests passed.
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+
+[1ALoading weights:   0%|          | 0/201 [00:00<?, ?it/s]
+[1ALoading weights:   0%|          | 1/201 [00:00<00:24,  8.30it/s]
+[1ALoading weights:  25%|██▌       | 51/201 [00:00<00:00, 272.79it/s]
+[1ALoading weights:  47%|████▋     | 95/201 [00:00<00:00, 339.30it/s]
+[1ALoading weights:  69%|██████▉   | 139/201 [00:00<00:00, 360.66it/s]
+[1ALoading weights:  92%|█████████▏| 184/201 [00:00<00:00, 370.05it/s]
+[1ALoading weights: 100%|██████████| 201/201 [00:00<00:00, 346.42it/s]
+
+[1AGenerating test split: 0 examples [00:00, ? examples/s]
+[1AGenerating test split: 224 examples [00:00, 2164.85 examples/s]
+
+[1ALoading weights:   0%|          | 0/201 [00:00<?, ?it/s]
+[1ALoading weights:   0%|          | 1/201 [00:00<00:27,  7.17it/s]
+[1ALoading weights:  29%|██▉       | 58/201 [00:00<00:00, 282.68it/s]
+[1ALoading weights:  51%|█████     | 103/201 [00:00<00:00, 342.18it/s]
+[1ALoading weights:  74%|███████▎  | 148/201 [00:00<00:00, 369.94it/s]
+[1ALoading weights:  96%|█████████▌| 193/201 [00:00<00:00, 386.87it/s]
+[1ALoading weights: 100%|██████████| 201/201 [00:00<00:00, 348.46it/s]
+| Configuration | Peak Memory (MB) | Qasper F1 | Avg Input Tokens | Tokens/s |
+| --- | ---: | ---: | ---: | ---: |
+| Baseline | 2238.56 | 11.17 | 1900 | 53.29 |
+| Pure Quantization | 2220.81 | 10.75 | 1900 | 16.27 |
+| Pure Sparsification | 2198.53 | 0.93 | 1900 | 32.94 |
+| Paged-TierKV (budget=4) | 2220.46 | 10.55 | 1900 | 16.44 |
+| Paged-TierKV (budget=8) | 2222.87 | 10.67 | 1900 | 16.75 |
+
+=== Extended table with memory-realism metrics ===
+| Configuration | Peak Mem (MB) | Qasper F1 | Avg Tokens | tok/s | HOT/WARM/COLD | Logical Resident (MB) | Dense Eq KV (MB) | Physical KV (MB) | Logical Compression | Physical Compression | Pool Util |
+| --- | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Baseline | 2238.56 | 11.17 | 1900 | 53.29 | 0/0/0 | 0.0 | 0.0 | 0.0 | 0.00x | 0.00x | 0.0% |
+| Pure Quantization | 2220.81 | 10.75 | 1900 | 16.27 | 88/2574/0 | 22.6 | 41.5 | 23.7 | 1.83x | 1.75x | 96.0% |
+| Pure Sparsification | 2198.53 | 0.93 | 1900 | 32.94 | 88/0/2574 | 1.3 | 41.5 | 1.4 | 32.73x | 29.99x | 100.0% |
+| Paged-TierKV (budget=4) | 2220.46 | 10.55 | 1900 | 16.44 | 132/2530/0 | 23.0 | 41.5 | 23.5 | 1.81x | 1.77x | 98.5% |
+| Paged-TierKV (budget=8) | 2222.87 | 10.67 | 1900 | 16.75 | 220/2442/0 | 23.6 | 41.5 | 24.8 | 1.76x | 1.68x | 95.5% |
+
+[1ALoading weights:   0%|          | 0/201 [00:00<?, ?it/s]
+[1ALoading weights:   0%|          | 1/201 [00:00<00:28,  7.06it/s]
+[1ALoading weights:  34%|███▍      | 69/201 [00:00<00:00, 340.34it/s]
+[1ALoading weights:  56%|█████▌    | 112/201 [00:00<00:00, 355.37it/s]
+[1ALoading weights:  78%|███████▊  | 157/201 [00:00<00:00, 380.87it/s]
+[1ALoading weights: 100%|██████████| 201/201 [00:00<00:00, 356.60it/s]
+
+[1ALoading weights:   0%|          | 0/201 [00:00<?, ?it/s]
+[1ALoading weights:   0%|          | 1/201 [00:00<00:25,  7.72it/s]
+[1ALoading weights:  34%|███▍      | 69/201 [00:00<00:00, 358.85it/s]
+[1ALoading weights:  61%|██████    | 123/201 [00:00<00:00, 423.25it/s]
+[1ALoading weights:  87%|████████▋ | 175/201 [00:00<00:00, 455.11it/s]
+[1ALoading weights: 100%|██████████| 201/201 [00:00<00:00, 408.32it/s]
+| Context Tokens | Baseline tok/s | Pure Quant tok/s | Paged-TierKV tok/s | Paged vs Baseline |
+| ---: | ---: | ---: | ---: | ---: |
+| 512 | 57.45 | 26.95 | 50.15 | 0.87x |
+| 1024 | 57.89 | 26.79 | 49.22 | 0.85x |
+| 1536 | 58.23 | 26.67 | 49.63 | 0.85x |
+| 1900 | 55.17 | 18.16 | 46.51 | 0.84x |
+Stopping app - local entrypoint completed.
+✓ App completed. View run at https://modal.com/apps/lixuank/main/ap-3FvbUOVUFeX3dp1YfUpvGW

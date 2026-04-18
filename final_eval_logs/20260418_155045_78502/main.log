@@ -1,0 +1,37 @@
+### Command: modal run main.py
+
+✓ Initialized. View run at https://modal.com/apps/lixuank/main/ap-Jvg4gWisXw3YSjKOuV9zqW
+✓ Created objects.
+├── 🔨 Created mount /Users/kanglixuan/Library/Mobile Documents/com~apple~CloudDocs/15-642 ML Sys/paged-tierkv/main.py
+├── 🔨 Created mount /Users/kanglixuan/Library/Mobile Documents/com~apple~CloudDocs/15-642 ML Sys/paged-tierkv
+├── 🔨 Created function test_cpp_and_baseline.
+├── 🔨 Created function run_no_score_anomaly_benchmark.
+├── 🔨 Created function run_preservation_tests.
+└── 🔨 Created function run_final_benchmark.
+BlockManager integration test passed.
+Policy and quantization integration test passed.
+Tensor-pool lazy growth test passed.
+Tensor-pool and Triton decode tests passed.
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Context truncation and decode metadata guard tests passed.
+Policy scheduling and tier-mode tests passed.
+Memory telemetry and multi-runtime tests passed.
+Compact pool slot transition tests passed.
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+
+[1ALoading weights:   0%|          | 0/201 [00:00<?, ?it/s]
+[1ALoading weights:   0%|          | 1/201 [00:00<00:21,  9.20it/s]
+[1ALoading weights:  29%|██▉       | 58/201 [00:00<00:00, 302.85it/s]
+[1ALoading weights:  51%|█████     | 103/201 [00:00<00:00, 353.71it/s]
+[1ALoading weights:  74%|███████▎  | 148/201 [00:00<00:00, 367.74it/s]
+[1ALoading weights:  96%|█████████▌| 193/201 [00:00<00:00, 373.69it/s]
+[1ALoading weights: 100%|██████████| 201/201 [00:00<00:00, 352.44it/s]
+
+[1AGenerating test split: 0 examples [00:00, ? examples/s]Generating test split: 224 examples [00:00, 2726.45 examples/s]
+
+[1ALoading weights:   0%|          | 0/201 [00:00<?, ?it/s]
+[1ALoading weights:   0%|          | 1/201 [00:00<00:23,  8.42it/s]
+[1ALoading weights:  29%|██▉       | 58/201 [00:00<00:00, 313.88it/s]
+[1ALoading weights:  51%|█████     | 103/201 [00:00<00:00, 367.05it/s]
+[1ALoading weights:  75%|███████▍  | 150/201 [00:00<00:00, 404.82it/s]
+[1ALoading weights: 100%|██████████| 201/201 [00:00<00:00, 387.56it/s]

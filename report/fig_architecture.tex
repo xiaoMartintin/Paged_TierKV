@@ -1,0 +1,90 @@
+\begin{tikzpicture}[
+  font=\scriptsize\sffamily,
+  >=Latex,
+  node distance=0.72cm and 0.62cm,
+  box/.style={
+    draw=black!65,
+    rounded corners=1.6pt,
+    align=center,
+    minimum height=0.66cm,
+    text width=2.78cm,
+    fill=black!4,
+    line width=0.45pt
+  },
+  side/.style={
+    draw=black!65,
+    rounded corners=1.6pt,
+    align=center,
+    minimum height=0.58cm,
+    text width=1.78cm,
+    fill=black!4,
+    line width=0.45pt
+  },
+  meta/.style={
+    draw=black!65,
+    rounded corners=1.6pt,
+    align=center,
+    minimum height=0.66cm,
+    text width=2.78cm,
+    fill=black!7,
+    line width=0.45pt
+  },
+  pool/.style={
+    draw=black!70,
+    rounded corners=1.6pt,
+    align=center,
+    minimum height=0.60cm,
+    text width=1.52cm,
+    line width=0.45pt
+  },
+  arrow/.style={->, line width=0.5pt, draw=black!70},
+  note/.style={font=\tiny\sffamily, text=black!65}
+]
+
+% 中轴主流程：全部严格共线
+\node[box] (attn) {LLaMA attention\\KV append};
+\node[box, below=0.78cm of attn] (runtime) {\texttt{TieredKVRuntime}\\request-local cache};
+\node[meta, below=2.05cm of runtime] (metadata) {GPU metadata\\table / state / slot / length};
+\node[box, below=3.20cm of metadata] (triton) {Triton decode\\online softmax\\dequant WARM};
+\node[box, below=0.92cm of triton] (out) {attention output\\no KV rebuild};
+
+% 左右辅助模块：围绕 runtime 对称
+\node[side, below left=0.62cm and 0.62cm of runtime] (policy) {policy engine\\\texttt{interval=64}\\\texttt{hot\_warm}};
+\node[side, below right=0.62cm and 0.62cm of runtime] (manager) {C++ \texttt{BlockManager}\\logical block ids};
+
+% 三层池：同一水平线
+\node[pool, fill=black!3, below left=1.35cm and 2.05cm of metadata] (hot) {HOT\\fp16 K/V};
+\node[pool, fill=black!8, below=1.35cm of metadata] (warm) {WARM\\uint8 K/V\\scale + zero};
+\node[pool, fill=black!13, below right=1.35cm and 2.05cm of metadata] (cold) {COLD\\metadata only};
+
+% 上半部分连线
+\draw[arrow] (attn) -- node[right, note, pos=0.55]{K,V} (runtime);
+\draw[arrow] (runtime.south west) -- ++(-0.26,-0.24) -| node[pos=0.28, above, note]{scores} (policy.north);
+\draw[arrow] (runtime.south east) -- ++(0.26,-0.24) -| node[pos=0.28, above, note]{alloc/state} (manager.north);
+\draw[arrow] (policy.south) -- ++(0,-0.34) -| (metadata.west);
+\draw[arrow] (manager.south) -- ++(0,-0.34) -| (metadata.east);
+\draw[arrow] (runtime.south) -- node[right, note, pos=0.58]{in-place updates} (metadata.north);
+
+% metadata 到三层池：左右对称、同层展开
+\draw[arrow] (metadata.south) -- ++(0,-0.55) -| (hot.north);
+\draw[arrow] (metadata.south) -- node[right, note, pos=0.2]{states + lengths} (warm.north);
+\draw[arrow] (metadata.south) -- ++(0,-0.55) -| (cold.north);
+
+% 三层池到 Triton
+\draw[arrow] (hot.south) -- ++(0,-0.45) -| (triton.west);
+\draw[arrow] (warm.south) -- node[right, note, pos=0.5]{dequant} (triton.north);
+\draw[arrow] (cold.south) -- ++(0,-0.45) -| node[pos=0.22, below, note]{zero K/V} (triton.east);
+
+\draw[arrow] (triton) -- (out);
+
+% 三层池包围框
+\node[
+  draw=black!45,
+  rounded corners=1.6pt,
+  dashed,
+  fit=(hot)(warm)(cold),
+  inner sep=0.18cm,
+  label={[note, yshift=0.08cm]above:compact state-separated pool}
+] {};
+
+\end{tikzpicture}

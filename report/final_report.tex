@@ -86,7 +86,7 @@ Long-context benchmarks and LLM serving frameworks provide the workload context 
 
 Paged-TierKV treats each layer's KV history as a sequence of fixed-size blocks. Each logical block is assigned one of three states. HOT blocks are stored in fp16 and are used for attention without quantization. WARM blocks are stored in uint8 with per-token metadata and dequantized inside the decode attention kernel. COLD blocks keep metadata and valid length but no resident dense KV storage.
 
-\begin{figure}[t]
+\begin{figure}[hbtp]
 \begin{center}
 \resizebox{\linewidth}{!}{\input{fig_architecture.tex}}
 \end{center}
@@ -134,7 +134,7 @@ We compare a dense Hugging Face baseline, pure quantization, pure sparsification
 
 Table~\ref{tab:qasper} shows that HOT+WARM Paged-TierKV preserves most of the baseline Qasper F1, while pure sparsification collapses. The budget-8 configuration reaches 10.67 F1 versus 11.17 for the dense baseline, a small absolute loss relative to the failure mode of pure sparsification at 0.93 F1. This is the quality argument for keeping most non-HOT blocks WARM rather than COLD. Its physical compression is 1.68$\times$ on the Qasper run, showing that the compact pool turns WARM placement into actual lower KV allocation rather than only a logical label.
 
-\begin{table}[t]
+\begin{table}[hbtp]
 \caption{Qasper-50 quality and memory summary at 1900 input tokens.}
 \label{tab:qasper}
 \vskip 0.15in
@@ -158,7 +158,7 @@ Baseline & 2238.56 & 11.17 & 53.29 & -- \\
 
 The tier-mode ablation in Table~\ref{tab:tiermodes} clarifies the quality-memory tradeoff. HOT-only preserves baseline quality but offers no compression: its physical compression is 0.99$\times$, effectively dense storage. HOT+WARM keeps quality close to baseline and gives meaningful physical compression. HOT+WARM+COLD improves physical compression to 4.40$\times$ but reduces Qasper F1 to 1.47, so it is not the quality-preserving default. This result is useful because it separates two claims. TierKV can aggressively reduce memory with COLD blocks, but the practical default must keep enough WARM information to answer long-context questions.
 
-\begin{table}[t]
+\begin{table}[hbtp]
 \caption{Tier-mode ablation. HOT+WARM is the final default because it preserves quality while compressing physical KV.}
 \label{tab:tiermodes}
 \vskip 0.15in
@@ -184,7 +184,7 @@ The distinction between logical and physical compression matters throughout the 
 
 The main systems result is the staged TinyLlama concurrency benchmark. Table~\ref{tab:scaling} compresses the curve to representative points. TierKV's peak memory grows more slowly than the dense baseline. The memory gap grows from 529.50 MB at 32 requests to 7239.73 MB at 448 requests. In the boundary run, the dense baseline succeeds at 448 requests but fails at 512 with CUDA out of memory. Paged-TierKV succeeds at 512 requests with 15159.07 MB peak memory, 12952.00 MB physical KV allocation, and 1.65$\times$ physical KV compression.
 
-\begin{table*}[t]
+\begin{table*}[hbtp]
 \caption{Representative TinyLlama high-concurrency scaling points with 1900-token prompts. Throughput ratio is TierKV divided by dense baseline.}
 \label{tab:scaling}
 \vskip 0.15in
@@ -208,7 +208,7 @@ Requests & Baseline MB & TierKV MB & TierKV phys. KV MB & Dense-eq. KV MB & Thro
 
 Table~\ref{tab:slopes} summarizes the memory slopes printed by the staged runner. The dense baseline grows at roughly 42--43 MB/request across TinyLlama stages. TierKV grows at roughly 25--27 MB/request. This is the clearest evidence that the compact pool changes the scaling curve, not just one high-load point. The 7B extension shows the same pattern at a larger per-request scale: baseline memory grows faster than TierKV at both 1024-token and 1536-token contexts.
 
-\begin{table}[t]
+\begin{table}[hbtp]
 \caption{Peak-memory slope summary. Lower MB/request means better memory scaling as concurrency grows.}
 \label{tab:slopes}
 \vskip 0.15in
@@ -230,7 +230,7 @@ Vicuna 1536, 1--8 & 791.65 & 479.32 \\
 \vskip -0.1in
 \end{table}
 
-\begin{figure}[t]
+\begin{figure}[hbtp]
 \begin{center}
 \includegraphics[width=\linewidth]{fig_memory_scaling.pdf}
 \end{center}
@@ -238,7 +238,7 @@ Vicuna 1536, 1--8 & 791.65 & 479.32 \\
 \label{fig:memory-scaling}
 \end{figure}
 
-\begin{figure}[t]
+\begin{figure}[hbtp]
 \begin{center}
 \includegraphics[width=\linewidth]{fig_throughput_ratio.pdf}
 \end{center}
@@ -248,7 +248,7 @@ Vicuna 1536, 1--8 & 791.65 & 479.32 \\
 
 The boundary summary is shown in Table~\ref{tab:boundary}. This is the strongest result in the project: the compact state-separated pool converts logical compression into physical memory savings large enough to extend the maximum supported concurrent load. It also clarifies the role of throughput. TierKV is not faster than dense baseline at matched successful points, but the baseline cannot produce a 512-request throughput number because it fails before the measurement completes.
 
-\begin{table}[t]
+\begin{table}[hbtp]
 \caption{Failure boundary in the final TinyLlama staged sweep.}
 \label{tab:boundary}
 \vskip 0.15in
@@ -271,7 +271,7 @@ Paged-TierKV & 512 & 972800 & none observed \\
 
 The 7B extension tests whether a larger MHA-style model becomes KV-bound enough for TierKV to exceed dense throughput. It does not. However, the extension supports the memory-scaling story on a model with much larger per-request KV footprint. The passkey sanity check confirms both baseline and TierKV preserve the expected passkey. At 1024-token context, the TierKV/dense throughput ratio improves from 0.44$\times$ to 0.77$\times$ as requests increase from 1 to 12, while the memory gap grows from 169.65 MB to 2329.80 MB. At 1536-token context, the ratio improves from 0.45$\times$ to 0.75$\times$, while the memory gap grows from 301.42 MB to 2487.73 MB.
 
-\begin{table}[t]
+\begin{table}[hbtp]
 \caption{Vicuna-7B MHA extension summary. No throughput crossover is observed.}
 \label{tab:extension}
 \vskip 0.15in
@@ -292,11 +292,23 @@ Context & \begin{tabular}{@{}r@{}}Req. \\ range\end{tabular} & Ratio trend & Gap
 
 This extension should be read as supporting evidence rather than the main result. It uses a different model and lower request counts because a 7B model has much higher base memory. The useful observation is that the same slope pattern appears: TierKV memory grows more slowly as concurrency increases. The throughput gap narrows with pressure, but it does not close. That means the current implementation's extra WARM-path and metadata overhead still dominates before a raw throughput crossover appears.
 
+\subsection{Overhead Analysis}
+
+While Paged-TierKV significantly reduces physical memory allocation, this compression inherently introduces overhead across five main dimensions.
+
+First, maintaining GPU-resident metadata---including logical block tables, block states, slot indices, and valid lengths---consumes device memory. Although this metadata incurs a minor storage cost, it is a necessary tradeoff that successfully eliminates CPU-GPU synchronization and removes Python-side cache reconstruction from the decode hot path.
+
+Second, WARM dequantization introduces additional computational and memory bandwidth costs. For blocks stored in uint8, the decode kernel must load the compressed keys and values alongside their scale and zero-point metadata to reconstruct the tensors on the fly. This process requires more arithmetic operations and memory traffic than directly reading a dense fp16 cache.
+
+Third, metadata indirection disrupts contiguous memory access patterns. Instead of reading a single continuous fp16 layout, the decoding phase must first consult block states and slot metadata to route reads to HOT, WARM, or COLD storage. While this lookup cost is minimal per block, it accumulates across every single decode step.
+
+Fourth, policy bookkeeping requires active runtime management. The system must track attention-derived scores, update tier assignments, and handle slot migrations within the compact pool. Even though policy updates are amortized (e.g., via \texttt{policy\_interval=64}), the associated state machine and migration logic still impose control overhead that is entirely absent in the dense baseline.
+
+Finally, per-request runtime management limits throughput scaling under high load. Because the staged benchmark maintains a request-local runtime for each active sequence rather than utilizing a fused batched kernel, request metadata, cache states, and scheduling are processed independently. This design choice ensures compatibility with the current batch-1 Triton path, but the resulting control overhead scales linearly as concurrency increases.
+
 \subsection{Discussion}
 
-Paged-TierKV does not make decode universally faster than the dense baseline. The Triton path avoids full-cache reconstruction, but WARM dequantization, metadata indirection, policy bookkeeping, and per-request serving overhead still cost throughput. The current benchmark also uses many independent batch-1 requests rather than a fused batched serving kernel, so it does not exploit batching to amortize launch and metadata overhead. The system result is therefore not a raw speedup claim. It is a memory-scaling claim: for high KV pressure, the compact pool lowers the physical memory slope and allows a larger successful load.
-
-The results also show why memory-realism telemetry was necessary. Logical resident KV measures what the policy intends to keep, while physical KV allocation measures what the implementation actually allocated. Before compact pools, these could diverge. In the final system, the Qasper HOT+WARM row reports 23.6 MB logical resident KV, 24.8 MB physical KV, and 41.5 MB dense-equivalent KV; at 512 TinyLlama requests, TierKV reports 12952.00 MB physical KV against 21373.00 MB dense-equivalent KV. These numbers make the memory claim inspectable rather than inferred from peak memory alone.
+Paged-TierKV does not make decode universally faster than the dense baseline. Its strongest result is instead a memory-scaling win: under high KV pressure, the compact pool lowers physical memory growth and extends the supported load. The current implementation still pays for WARM dequantization, state-aware routing, and request-local control overhead, so future work should focus on reducing WARM-path cost and integrating more fused batched serving.
 
 \section{Conclusion}
 
